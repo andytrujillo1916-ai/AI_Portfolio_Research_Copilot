@@ -5,6 +5,7 @@ from journal import add_journal_entry, load_journal
 from prediction_log import add_prediction, evaluate_all_predictions
 from research_agent import generate_research_summary
 from signal_engine import generate_signal
+from backtester import run_simple_backtest
 
 
 def render_market_snapshot(snapshot, shares):
@@ -65,6 +66,17 @@ def render_price_chart(price_data):
     col2.metric("Volatility (ann.)", f"{risk['volatility_pct']:.2f}%")
     col3.metric("Max drawdown", f"{risk['max_drawdown_pct']:.2f}%")
     return risk
+
+
+def render_backtest_section(price_data):
+    """Run a simple backtest and display results."""
+    results = run_simple_backtest(price_data)
+    st.header("Backtesting")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Buy & Hold", f"{results['buy_and_hold_return_pct']:+.2f}%")
+    col2.metric("Strategy", f"{results['strategy_return_pct']:+.2f}%")
+    col3.metric("Max drawdown", f"{results['max_drawdown_pct']:.2f}%")
+    col4.metric("Signal changes", f"{results['number_of_signal_changes']}")
 
 
 def render_asset_comparison(selected_asset, watchlist, compare_assets, period, normalize):

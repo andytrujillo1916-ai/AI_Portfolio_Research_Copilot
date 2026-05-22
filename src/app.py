@@ -5,6 +5,7 @@ from ui_sections import (
     render_asset_comparison,
     render_market_snapshot,
     render_price_chart,
+    render_backtest_section,
     render_prediction_log,
     render_research_agent,
     render_signal_engine,
@@ -41,6 +42,7 @@ st.sidebar.write(f"**Selected period:** {period}")
 render_market_snapshot(snapshot, shares)
 
 risk = render_price_chart(price_data)
+render_backtest_section(price_data)
 
 compare_assets = st.multiselect(
     "Compare with assets",
