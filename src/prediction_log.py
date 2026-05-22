@@ -2,6 +2,8 @@ from csv import DictReader, DictWriter
 from datetime import datetime
 from pathlib import Path
 
+from evaluation_engine import evaluate_prediction
+
 DATA_PATH = Path(__file__).resolve().parent.parent / "data"
 CSV_PATH = DATA_PATH / "prediction_log.csv"
 HEADERS = [
@@ -78,42 +80,47 @@ def update_prediction_outcome(index, outcome, lesson):
     return entries[index]
 
 
-def evaluate_prediction(entry, current_price):
-    """Evaluate a single prediction against the current price."""
-    evaluated = dict(entry)
-    try:
-        price_at_signal = float(entry.get("price_at_signal", ""))
-    except ValueError:
-        price_at_signal = None
-
-    if price_at_signal is not None and current_price is not None:
-        price_change_pct = ((current_price - price_at_signal) / price_at_signal) * 100
-        evaluated["current_price"] = current_price
-        evaluated["price_change_pct"] = round(price_change_pct, 2)
-    else:
-        evaluated["current_price"] = None
-        evaluated["price_change_pct"] = None
-
-    signal = entry.get("signal", "")
-    if evaluated["price_change_pct"] is not None and signal in {"Watch", "Strong Watch"}:
-        if evaluated["price_change_pct"] > 0:
-            evaluated["simple_result"] = "Correct direction"
-        elif evaluated["price_change_pct"] < 0:
-            evaluated["simple_result"] = "Wrong direction"
-        else:
-            evaluated["simple_result"] = "Neutral / unclear"
-    else:
-        evaluated["simple_result"] = "Neutral / unclear"
-
-    return evaluated
-
-
-def evaluate_all_predictions(current_prices_by_symbol):
-    """Evaluate all saved predictions against a mapping of current prices."""
+def evaluate_all_predictions(symbol, current_price):
+    """Evaluate saved predictions for one symbol against the current price."""
     entries = load_predictions()
-    results = []
+    evaluated_predictions = []
     for entry in entries:
-        symbol = entry.get("symbol")
-        current_price = current_prices_by_symbol.get(symbol)
-        results.append(evaluate_prediction(entry, current_price))
-    return results
+        if entry.get("symbol") != symbol:
+            continue
+
+        evaluation = evaluate_prediction(entry, current_price)
+        evaluated_entry = dict(entry)
+        evaluated_entry.update(evaluation)
+        evaluated_predictions.append(evaluated_entry)
+
+    total_predictions = len(evaluated_predictions)
+    evaluated_returns = [
+        entry["realized_return_pct"]
+        for entry in evaluated_predictions
+        if entry.get("realized_return_pct") is not None
+    ]
+    correct_count = sum(
+        1 for entry in evaluated_predictions if entry.get("correct_direction")
+    )
+
+    hit_rate = (
+        round((correct_count / total_predictions) * 100, 2)
+        if total_predictions
+        else 0.0
+    )
+    average_return = (
+        round(sum(evaluated_returns) / len(evaluated_returns), 2)
+        if evaluated_returns
+        else 0.0
+    )
+    best_trade = max(evaluated_returns) if evaluated_returns else None
+    worst_trade = min(evaluated_returns) if evaluated_returns else None
+
+    return {
+        "total_predictions": total_predictions,
+        "hit_rate": hit_rate,
+        "average_return": average_return,
+        "best_trade": best_trade,
+        "worst_trade": worst_trade,
+        "recent_predictions": list(reversed(evaluated_predictions))[:5],
+    }

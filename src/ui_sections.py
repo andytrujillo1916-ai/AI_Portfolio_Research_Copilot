@@ -2,9 +2,11 @@ import streamlit as st
 
 from market_data import get_asset_comparison, get_risk_metrics
 from journal import add_journal_entry, load_journal
-from prediction_log import add_prediction, evaluate_all_predictions
+from prediction_log import add_prediction, evaluate_all_predictions, load_predictions
 from research_agent import generate_research_summary
 from signal_engine import generate_signal
+from backtester import run_simple_backtest
+from news_engine import generate_news_context, get_recent_news
 
 
 def render_market_snapshot(snapshot, shares):
@@ -65,6 +67,37 @@ def render_price_chart(price_data):
     col2.metric("Volatility (ann.)", f"{risk['volatility_pct']:.2f}%")
     col3.metric("Max drawdown", f"{risk['max_drawdown_pct']:.2f}%")
     return risk
+
+
+def render_backtest_section(price_data):
+    """Run a simple backtest and display results."""
+    results = run_simple_backtest(price_data)
+    st.header("Backtesting")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Buy & Hold", f"{results.get('buy_and_hold_return_pct', 0.0):+.2f}%")
+    col2.metric("Strategy", f"{results.get('strategy_return_pct', 0.0):+.2f}%")
+    col3.metric("Max drawdown", f"{results.get('max_drawdown_pct', 0.0):.2f}%")
+    col4.metric("Signal changes", f"{results.get('number_of_signal_changes', 0)}")
+
+    # Plot equity curves if available
+    equity = results.get("equity_curve")
+    if equity is not None:
+        try:
+            eq_df = equity.copy()
+            if "Date" in eq_df.columns:
+                eq_df = eq_df.set_index("Date")
+            st.markdown("**Equity curve (base 100)**")
+            st.line_chart(eq_df)
+        except Exception:
+            st.write("Unable to render equity curve.")
+
+    # Simple verdict comparing strategy vs buy-and-hold
+    buy_ret = results.get("buy_and_hold_return_pct", 0.0)
+    strat_ret = results.get("strategy_return_pct", 0.0)
+    if strat_ret > buy_ret:
+        st.success("Strategy outperformed buy and hold")
+    else:
+        st.info("Strategy underperformed buy and hold")
 
 
 def render_asset_comparison(selected_asset, watchlist, compare_assets, period, normalize):
@@ -133,11 +166,15 @@ def render_research_agent(selected_asset, snapshot, risk, notes=""):
 
 def render_signal_engine(selected_asset, snapshot, risk):
     """Render the signal engine section and allow saving predictions."""
-    signal_data = generate_signal(selected_asset, snapshot, risk)
+    # Include news context to create a news-aware composite score
+    news_context = generate_news_context(selected_asset)
+    signal_data = generate_signal(selected_asset, snapshot, risk, news_context=news_context)
     with st.expander("Signal Engine", expanded=True):
-        st.subheader("Research-only quant signal")
+        st.subheader("Research-only composite signal")
         st.write(f"**Signal:** {signal_data['signal']}")
-        st.write(f"**Score:** {signal_data['score']}/100")
+        st.write(f"**Final score:** {signal_data['score']}/100")
+        st.write(f"- Quant score: {signal_data.get('quant_score', 0)}")
+        st.write(f"- News score: {signal_data.get('news_score', 0)}")
 
         st.markdown("**Reasons**")
         for reason in signal_data["reasons"]:
@@ -164,14 +201,124 @@ def render_signal_engine(selected_asset, snapshot, risk):
                 st.write(entry)
 
 
+def render_news_intelligence(symbol, show_debug=False):
+    """Render event-aware news intelligence research context.
+
+    Args:
+        symbol: asset symbol
+        show_debug: if True, show raw news debug expander
+    """
+    context = generate_news_context(symbol)
+    with st.expander("News Intelligence", expanded=True):
+        st.subheader("Event-aware research context")
+        st.write("This is event-aware research context, not prediction.")
+
+        st.markdown("**Headline summary**")
+        # Prefer concise bullet summary generated from recent headlines
+        recent = context.get("recent_headlines") or get_recent_news(symbol)
+        if recent:
+            # Use top 2-3 headlines as short bullets
+            for item in recent[:3]:
+                title = item.get("title") or "Untitled headline"
+                # Shorten long titles for readability
+                short = title if len(title) <= 140 else title[:137] + "..."
+                st.write(f"- {short}")
+        else:
+            # fallback to whatever summary exists
+            summary = context.get("headline_summary") or "No summary available."
+            # keep it short: truncate to ~200 chars
+            if len(summary) > 200:
+                summary = summary[:197] + "..."
+            st.write(summary)
+
+        st.markdown("**Market sentiment**")
+        sentiment_color = {
+            "Bullish": "✅",
+            "Neutral": "⚖️",
+            "Bearish": "⚠️",
+        }.get(context["market_sentiment"], "")
+        st.write(f"{sentiment_color} {context['market_sentiment']}")
+
+        st.markdown("**Event tags**")
+        if context["event_tags"]:
+            st.write(", ".join(context["event_tags"]))
+        else:
+            st.write("None")
+
+        st.markdown("**Risk flags**")
+        if context["risk_flags"]:
+            for flag in context["risk_flags"]:
+                st.warning(f"- {flag}")
+        else:
+            st.write("None")
+
+        # Show recent headlines if available (numbered top 5)
+        recent = context.get("recent_headlines") or get_recent_news(symbol)
+        st.markdown("**Recent headlines**")
+        if recent:
+            md_lines = []
+            count = 0
+            for i, item in enumerate(recent[:5], start=1):
+                title = item.get("title") or "Untitled headline"
+                publisher = item.get("publisher") or "Unknown publisher"
+                link = item.get("link") or ""
+                pubtime = item.get("publish_time")
+                time_str = ""
+                try:
+                    if hasattr(pubtime, "strftime"):
+                        time_str = pubtime.strftime("%Y-%m-%d %H:%M")
+                    elif pubtime:
+                        time_str = str(pubtime)
+                except Exception:
+                    time_str = str(pubtime)
+
+                # Skip empty items
+                if not title and not publisher and not link:
+                    continue
+
+                count += 1
+                if link:
+                    md_lines.append(f"{count}. [{title}]({link}) — {publisher} {time_str}")
+                else:
+                    md_lines.append(f"{count}. {title} — {publisher} {time_str}")
+
+            if md_lines:
+                st.markdown("\n".join(md_lines))
+            else:
+                st.write("No recent headlines available.")
+        else:
+            st.write("No recent headlines available.")
+
+        # Raw news debug: only show when explicitly requested
+        if show_debug:
+            try:
+                import yfinance as yf
+
+                raw = getattr(yf.Ticker(symbol), "news", None)
+                if raw:
+                    with st.expander("Raw news debug", expanded=False):
+                        first = raw[0]
+                        try:
+                            st.json(first)
+                        except Exception:
+                            st.write(first)
+            except Exception:
+                # ignore debug fetch failures silently
+                pass
+
+
 def render_prediction_log(selected_asset, current_price):
     """Render the saved prediction log and evaluation section."""
-    predictions = evaluate_all_predictions({selected_asset: current_price})
+    predictions = [
+        entry
+        for entry in load_predictions()
+        if entry.get("symbol") == selected_asset
+    ]
 
     with st.expander("View Prediction Log", expanded=False):
         st.subheader("Prediction Learning")
         st.write(
-            "This section checks whether saved signals were useful over time."
+            "This section stores research-only signals for later evaluation."
         )
 
         if not predictions:
@@ -186,16 +333,49 @@ def render_prediction_log(selected_asset, current_price):
             st.write(f"- Price at signal: {entry['price_at_signal']}")
             st.write(f"- Time horizon: {entry['time_horizon'] or 'None'}")
             st.write(f"- Outcome: {entry['outcome'] or 'Pending'}")
-            if entry.get("current_price") is not None:
-                st.write(f"- Current price: {entry['current_price']}")
-                st.write(f"- Price change: {entry['price_change_pct']:+.2f}%")
-                st.write(f"- Evaluation: {entry['simple_result']}")
             st.write("- Reasons:")
             for reason in entry["reasons"].split(" | "):
                 st.info(f"  - {reason}")
             st.write("- Risks:")
             for risk_item in entry["risks"].split(" | "):
                 st.warning(f"  - {risk_item}")
+            st.write("---")
+
+
+def render_prediction_evaluation(symbol, current_price):
+    """Render research-only evaluation results for saved predictions."""
+    summary = evaluate_all_predictions(symbol, current_price)
+
+    with st.expander("Prediction Learning Summary", expanded=True):
+        st.write("Research-only signal evaluation. This is not trading advice.")
+
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Total predictions", summary["total_predictions"])
+        col2.metric("Hit rate", f"{summary['hit_rate']:.2f}%")
+        col3.metric("Avg return", f"{summary['average_return']:+.2f}%")
+        best = summary["best_trade"]
+        worst = summary["worst_trade"]
+        col4.metric("Best", f"{best:+.2f}%" if best is not None else "N/A")
+        col5.metric("Worst", f"{worst:+.2f}%" if worst is not None else "N/A")
+
+        st.markdown("**Recent evaluated predictions**")
+        if not summary["recent_predictions"]:
+            st.write("No evaluated predictions yet.")
+            return
+
+        for entry in summary["recent_predictions"]:
+            return_pct = entry.get("realized_return_pct")
+            return_text = (
+                f"{return_pct:+.2f}%" if return_pct is not None else "N/A"
+            )
+            st.markdown(
+                f"**{entry['date']} | {entry['symbol']} | {entry['signal']}**"
+            )
+            st.write(f"- Price at signal: {entry['price_at_signal']}")
+            st.write(f"- Current price: {current_price}")
+            st.write(f"- Realized return: {return_text}")
+            st.write(f"- Correct direction: {entry['correct_direction']}")
+            st.write(f"- Evaluation: {entry['evaluation_label']}")
             st.write("---")
 
 
