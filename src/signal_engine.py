@@ -1,9 +1,32 @@
-def generate_signal(symbol, snapshot, risk, news_context=None):
-    """Generate a simple rule-based research signal with optional news scoring.
+def generate_signal(
+    symbol,
+    snapshot,
+    risk,
+    news_context=None,
+    adaptive_context=None,
+    asset_class=None,
+):
+    """Generate a simple rule-based research signal with optional adaptive tuning."""
 
-    Returns a dict with `quant_score`, `news_score`, and final `score`.
-    """
-    # Quant portion (original logic) — compute as quant_score
+    def _apply_adaptive_adjustments(quant_score, news_score, volatility_pct, max_drawdown_pct):
+        if not adaptive_context:
+            return quant_score, news_score
+
+        adjustments = adaptive_context.get("suggested_weight_adjustments", {})
+
+        if "quant_score" in adjustments:
+            quant_score = int(round(quant_score * float(adjustments["quant_score"])))
+        if "news_score" in adjustments:
+            news_score = int(round(news_score * float(adjustments["news_score"])))
+        if volatility_pct > 30 and "volatility" in adjustments:
+            quant_score -= max(1, int(round((1.0 - float(adjustments["volatility"])) * 5)))
+        if max_drawdown_pct < -20 and "max_drawdown" in adjustments:
+            quant_score -= max(1, int(round((1.0 - float(adjustments["max_drawdown"])) * 5)))
+
+        quant_score = max(0, quant_score)
+        news_score = max(-20, min(20, news_score))
+        return quant_score, news_score
+
     quant_score = 50
     reasons = []
     risks = []
@@ -47,7 +70,6 @@ def generate_signal(symbol, snapshot, risk, news_context=None):
     else:
         reasons.append("Max drawdown is moderate, monitor downside risk.")
 
-    # News scoring
     news_score = 0
     if news_context:
         sentiment = news_context.get("market_sentiment", "Neutral")
@@ -56,22 +78,25 @@ def generate_signal(symbol, snapshot, risk, news_context=None):
         elif sentiment == "Bearish":
             news_score -= 5
 
-        # positive event tags
         positive_tags = {"earnings", "ai", "product", "guidance"}
         tags = set([t.lower() for t in news_context.get("event_tags", [])])
         for tag in tags:
             if tag in positive_tags:
                 news_score += 2
 
-        # risk flags penalize
         risk_flags = news_context.get("risk_flags", [])
         news_score -= 3 * len(risk_flags)
 
-    # Combined score: quant_score + news_score, then mapped to 0-100
+    quant_score, news_score = _apply_adaptive_adjustments(
+        quant_score,
+        news_score,
+        volatility_pct,
+        max_drawdown_pct,
+    )
+
     raw_score = quant_score + news_score
     final_score = max(0, min(100, int(round(raw_score))))
 
-    # Signal labels based on final_score
     if final_score >= 80:
         signal = "Strong Watch"
     elif final_score >= 60:
@@ -81,7 +106,6 @@ def generate_signal(symbol, snapshot, risk, news_context=None):
     else:
         signal = "Avoid"
 
-    # Ensure at least one reason/risk message
     if not reasons:
         reasons.append("No strong positive signals detected yet.")
     if not risks:

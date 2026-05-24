@@ -1,5 +1,24 @@
+from research_universe import get_default_research_watchlist
+
+
 def get_watchlist():
-    return ["SPY", "VOO", "QQQ", "AAPL", "MSFT", "NVDA"]
+    return get_default_research_watchlist()
+
+
+def get_sector_watchlist():
+    return {
+        "Technology": "XLK",
+        "Healthcare": "XLV",
+        "Financials": "XLF",
+        "Energy": "XLE",
+        "Consumer Discretionary": "XLY",
+        "Consumer Staples": "XLP",
+        "Industrials": "XLI",
+        "Utilities": "XLU",
+        "Real Estate": "XLRE",
+        "Materials": "XLB",
+        "Communication Services": "XLC",
+    }
 
 
 def _mock_snapshot(symbol):
@@ -19,6 +38,8 @@ def _mock_snapshot(symbol):
         "price": price,
         "change_pct": change,
         "volume": volume,
+        "last_timestamp": "",
+        "is_fallback": True,
     }
 
 
@@ -43,18 +64,29 @@ def get_price_history(symbol, period="1mo"):
             raise ValueError(f"Empty history from yfinance for {symbol} ({period})")
         df = hist.reset_index()[["Date", "Close"]]
         df["Date"] = pd.to_datetime(df["Date"])
-        return {"source": "yfinance", "data": df}
+        last_timestamp = df["Date"].iloc[-1].isoformat() if not df.empty else ""
+        return {
+            "source": "yfinance",
+            "error": "",
+            "data": df,
+            "last_timestamp": last_timestamp,
+            "is_fallback": False,
+        }
     except ModuleNotFoundError as error:
         return {
             "source": "mock",
             "error": str(error),
             "data": _mock_price_history(symbol),
+            "last_timestamp": "",
+            "is_fallback": True,
         }
     except Exception as error:
         return {
             "source": "mock",
             "error": str(error),
             "data": _mock_price_history(symbol),
+            "last_timestamp": "",
+            "is_fallback": True,
         }
 
 
@@ -85,22 +117,32 @@ def get_market_snapshot(symbol):
         prev_close = float(prev["Close"]) if "Close" in prev else price
         change_pct = round((price - prev_close) / prev_close * 100, 2) if prev_close else 0.0
         volume = int(latest.get("Volume", 0))
+        last_timestamp = recent.index[-1]
+        try:
+            last_timestamp = last_timestamp.isoformat()
+        except Exception:
+            last_timestamp = str(last_timestamp)
         return {
             "symbol": symbol,
             "price": price,
             "change_pct": change_pct,
             "volume": volume,
             "source": "yfinance",
+            "error": "",
+            "last_timestamp": last_timestamp,
+            "is_fallback": False,
         }
     except ModuleNotFoundError as error:
         snapshot = _mock_snapshot(symbol)
         snapshot["source"] = "mock"
         snapshot["error"] = str(error)
+        snapshot["is_fallback"] = True
         return snapshot
     except Exception as error:
         snapshot = _mock_snapshot(symbol)
         snapshot["source"] = "mock"
         snapshot["error"] = str(error)
+        snapshot["is_fallback"] = True
         return snapshot
 
 

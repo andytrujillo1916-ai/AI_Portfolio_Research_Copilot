@@ -1,218 +1,96 @@
 # AI Portfolio Research Copilot
 
-**⚠️ RESEARCH ONLY — Not financial advice. No trading execution. No broker APIs.**
+AI Portfolio Research Copilot is a research-only AI quant workstation built in Streamlit. It helps users analyze market context, test strategy ideas, evaluate signal quality, and produce structured paper-trading decision support without executing real trades.
 
-## Project Purpose
+## Why I Built This
 
-Build a **research-only investment learning dashboard** that combines market intelligence, signal generation, and prediction tracking into a single interface. This tool helps students and researchers understand how signals perform over time without executing trades.
+I built this project to practice full-stack quant research engineering: turning raw market context into explainable, modular decision support. The goal is to show strong product thinking, safe AI workflow design, and clear communication of uncertainty, not to build a live trading bot.
 
-## Problem Being Solved
+## Core Features
 
-Investors and researchers need a simple, organized way to:
-- Monitor market data for stocks and ETFs
-- Generate and track research signals
-- Compare strategies against buy-and-hold
-- Learn from past predictions
-- Capture research notes in one place
+- Market snapshot, charting, and risk metrics
+- News intelligence and sentiment context
+- Signal generation and learning evaluation
+- Backtesting, strategy lab, and walk-forward testing
+- Opportunity ranking, conviction scoring, and execution readiness
+- Position sizing, entry/exit framework, and exposure controls
+- Meta decision layer, sub-agent review board, and executive dashboard
+- Research logging, health checks, and workflow orchestration
 
-All without jumping between tools or placing actual trades.
+## Architecture Overview
 
-## Users
+The app uses a modular engine pattern:
+- `src/app.py`: orchestration and layout (tabs + shared state)
+- `src/ui_sections.py`: rendering layer for each workflow section
+- `src/*_engine.py`: focused research engines (signal/risk/opportunity/etc.)
+- `src/database.py` + `src/db_service.py`: centralized SQLite persistence
+- `tests/`: lightweight validation of core engine behavior
 
-- 📚 Market research learners
-- 🎓 Students building portfolio theory knowledge
-- 📊 Individual investors analyzing strategies
-- 🤖 AI-assisted researchers testing hypotheses
+Detailed architecture notes are in [docs/current_architecture.md](docs/current_architecture.md).
 
-## Current Features
+## Screenshots
 
-### Core Dashboard
-- **Market Snapshot** — Real-time price, volume, position value (yfinance with fallback)
-- **Price Chart** — Historical performance with volatility & drawdown metrics
-- **Backtesting** — SMA(20) strategy vs. buy-and-hold, equity curve visualization
+Add screenshots here as the UI evolves:
+- `docs/screenshots/executive-dashboard.png`
+- `docs/screenshots/strategy-lab.png`
+- `docs/screenshots/research-tab.png`
 
-### Research Tools
-- **Research Notes** — Capture thoughts and observations
-- **Research Agent** — Rule-based bull/bear case analysis
-- **Signal Engine** — Composite quant + news-aware signal scoring (0–100)
-- **News Intelligence** — Real yfinance headlines, sentiment, event tags, risk flags
+## Setup Instructions
 
-### Learning & Tracking
-- **Prediction Log** — Save signals with reasoning
-- **Prediction Evaluation** — Measure signal accuracy over time (hit rate, realized return, Strong Hit/Partial Hit/Miss)
-- **Research Journal** — Long-form thesis with entry/target/time horizon
-
-### Portfolio Tools
-- **Asset Comparison** — Side-by-side performance across watchlist
-- **Multiple assets** — Built-in watchlist (e.g., AAPL, MSFT, GOOGL, SPY, QQQ)
-
-## Tech Stack
-
-- **Frontend:** Streamlit (Python UI framework)
-- **Data:** Pandas, yfinance (market data)
-- **Storage:** CSV (predictions, research journal, watchlist)
-- **Environment:** Conda (Python 3.11+)
-- **Version Control:** Git / GitHub
-
-## Safety & Scope
-
-### ✅ In Scope (Research-Only)
-- Signal generation and backtesting
-- Prediction tracking and evaluation
-- Market data visualization
-- News intelligence and sentiment
-- Portfolio performance comparison
-- Research notes and theses
-
-### ❌ Out of Scope (Never)
-- **Live trading execution**
-- **Broker APIs** (real or simulated)
-- **Account management**
-- **Auto-trading / algorithmic trading**
-- **Financial advice or guarantees**
-
----
-
-## Setup
-
-### 1. Clone the Repository
+1. Clone the repository:
 
 ```bash
 git clone https://github.com/<your-username>/AI_Portfolio_Research_Copilot.git
 cd AI_Portfolio_Research_Copilot
 ```
 
-### 2. Create and Activate Conda Environment
+2. Create and activate environment:
 
-```bash
+```powershell
 conda create -n ai_portfolio_research python=3.11 -y
 conda activate ai_portfolio_research
 ```
 
-### 3. Install Dependencies
+3. Install requirements:
 
-```bash
+```powershell
 pip install -r requirements.txt
 ```
 
-### 4. Run the App
+4. Run app:
 
-```bash
-cd src
-streamlit run app.py
+```powershell
+.\scripts\run_app.ps1
 ```
 
-The dashboard will open at `http://localhost:8501`.
+## Run Tests
 
----
+```powershell
+.\scripts\run_tests.ps1
+```
 
-## Quick Tour
+Or:
 
-1. **Select an asset** from the sidebar (default: AAPL)
-2. **Choose a time period** (5d, 1mo, 3mo, 6mo, 1y)
-3. **View market data** — snapshot, price chart, backtesting results
-4. **Read news** — recent headlines with sentiment and event tags
-5. **Generate a signal** — quant + news composite score
-6. **Save a prediction** — log your hypothesis with time horizon
-7. **Check evaluation** — see how past signals performed
-8. **Add research notes** — capture thesis and risk analysis
-9. **View journal** — long-form thesis tracking
+```powershell
+python -m pytest
+```
 
----
+## Roadmap
 
-## Key Concepts
+- Improve model-guided reasoning quality while preserving safety boundaries
+- Expand evaluation quality gates and regression tests
+- Strengthen research memory and cross-asset analytics
+- Improve portfolio-level scenario and stress systems
+- Add better visual polish and presentation artifacts
 
-### Signal Scoring
-- **Quant Score** (0–100): Price momentum, volatility, drawdown
-- **News Score**: Sentiment (±5), event tags (+2), risk flags (-3)
-- **Final Score**: Composite of both
-- **Signal Label**: "Strong Watch", "Watch", "Caution", "Avoid"
+See [docs/QUANT_ROADMAP.md](docs/QUANT_ROADMAP.md) for phased planning.
 
-### Prediction Evaluation
-- **Correct Direction**: Did the price move as the signal suggested?
-- **Hit Rate**: % of predictions with correct direction
-- **Realized Return**: (Current Price - Entry Price) / Entry Price * 100
-- **Labels**: "Strong Hit" (≥5% correct), "Partial Hit" (correct, <5%), "Miss"
+## Research-Only Disclaimer
 
-### Backtesting
-- **Strategy**: Go long when Close > SMA(20), exit when Close ≤ SMA(20)
-- **Baseline**: Buy-and-hold the entire period
-- **Equity Curve**: Both strategies visualized starting at 100
+This project is for research and education only.
 
----
-
-## Documentation
-
-- **[docs/current_architecture.md](docs/current_architecture.md)** — System design and module reference
-- **[docs/development_workflow.md](docs/development_workflow.md)** — How to run, develop, and contribute safely
-- **[docs/agent_workflow.md](docs/agent_workflow.md)** — AI copilot guidelines
-
----
-
-## Development
-
-### Adding a Feature
-
-1. Create or modify a module in `src/`
-2. Test in isolation: `python -c "from module import function; print(function(...))"`
-3. Test in the full app by running `streamlit run src/app.py`
-4. Commit with a clear message:
-   ```bash
-   git add src/module.py docs/current_architecture.md
-   git commit -m "Feature: add X component; docs: update architecture"
-   git push origin feature/my-feature
-   ```
-
-### Testing Data
-
-The app includes a fallback "mock" data source. If yfinance is unavailable or rate-limited, the dashboard will still work with synthetic data and show "Using fallback market data" in the sidebar.
-
----
-
-## License
-
-MIT (or specify your license)
-
----
-
-## Disclaimer
-
-**This tool is for research and learning purposes only.**
-
-- Not financial advice
-- No trading execution
-- No guaranteed predictions
-- Past performance ≠ future results
-- Always do your own due diligence
-- Consult a financial advisor for investment decisions
-
----
-
-## Contributing
-
-See [docs/development_workflow.md](docs/development_workflow.md) for guidelines on:
-- Setting up your environment
-- Creating branches and commits
-- Safe Copilot usage
-- Code review checklist
-
----
-
-## Support
-
-For questions or issues:
-1. Check [docs/current_architecture.md](docs/current_architecture.md) for system overview
-2. Check [docs/development_workflow.md](docs/development_workflow.md) for setup/troubleshooting
-3. Open a GitHub issue with a clear description
-
-## Current status
-- Project scaffold created.
-- Core design defined as a research dashboard, not a live trading bot.
-
-## Next steps
-- Build dashboard MVP.
-- Add market data source.
-- Show price charts.
-- Add asset notes.
-- Compare ETF performance.
-- Prepare for backtesting later.
+- No broker API integrations
+- No live trading execution
+- No auto-execution workflows
+- No guaranteed returns or certainty claims
+- Outputs are decision support, not financial advice

@@ -1,0 +1,2 @@
+date,symbol,price,return_pct,volatility_pct,max_drawdown_pct,regime,signal,signal_score,exposure_level,trade_decision,research_summary
+2026-05-23 01:50:35,MSFT,418.57000732421875,0.9,24.02,-5.6,Sideways / Range,Watch,63,None,Hold,"Cautiously Bullish | Current price is $418.57. Trend return is positive at +0.90%. Drawdown has been modest. | Recent price change is negative at -0.12%. Volatility is elevated. No user notes have been added yet. | Volatility is 24.02%, max drawdown is -5.60%."

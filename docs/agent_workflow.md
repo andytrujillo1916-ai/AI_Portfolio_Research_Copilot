@@ -1,42 +1,72 @@
 # Agent Workflow
 
-This project uses AI agents to build the AI Portfolio Research Copilot carefully, one practical step at a time. The app is research-only for now and must stay focused on learning, market study, notes, backtesting, and paper-trading experiments.
+This project uses AI agents to build AI Portfolio Research Copilot carefully, one practical step at a time. The app must stay research-only and should help learners understand market data, signals, portfolios, and backtests without executing trades.
 
-## Development Loop
+## Agent roles
 
-Use this loop for every feature or fix:
+### ChatGPT
+- Plan the smallest safe change
+- Explain the tradeoffs in plain language
+- Draft the implementation and documentation
+- Summarize what changed and what should be tested next
 
-1. Plan: define the goal, affected files, and smallest useful change.
-2. Build: make focused edits without changing unrelated behavior.
-3. Run: start or test the app with the relevant command.
-4. Inspect: review the UI, logs, outputs, and changed files.
-5. Fix: correct issues before expanding scope.
-6. Commit: summarize what changed and why.
+### Copilot
+- Edit files directly in the workspace
+- Keep the change focused on the request
+- Preserve current app behavior unless asked otherwise
+- Suggest clean, readable implementations
 
-## Agent Roles
+### Codex
+- Handle larger multi-file edits
+- Check for regressions across the app
+- Help verify that documentation and code stay aligned
 
-- Builder Agent: implements small, well-scoped features using the existing project structure.
-- Debugger Agent: investigates errors, reproduces issues, and proposes minimal fixes.
-- Reviewer Agent: checks for bugs, regressions, unclear code, missing tests, and risky scope creep.
-- Quant Research Agent: helps design indicators, backtests, comparisons, and paper-trading experiments without treating them as financial advice.
-- Safety Agent: enforces research-only boundaries, blocks broker integration, and watches for profit guarantees or live execution.
-- Documentation Agent: updates README, agent guidance, tasks, notes, and workflow docs so future agents understand the project.
+### Future Claude Code
+- Review scope, safety, and clarity
+- Flag risky changes early
+- Improve structure, readability, and maintainability
 
-## Rules
+## Development loop
 
-- Keep the project research-only for now.
+1. Plan the smallest safe change.
+2. Build the change in the relevant files.
+3. Run or test the change.
+4. Inspect the UI, outputs, and changed files.
+5. Fix issues before expanding scope.
+6. Summarize what changed and what should be validated next.
+
+## Safe build rules
+
+- Keep the project research-only.
 - Do not add broker APIs.
 - Do not add live trading.
-- Do not claim or imply guaranteed profit.
+- Do not place real orders.
+- Do not claim guaranteed profit.
 - Keep code simple and easy to inspect.
 - Build one feature at a time.
-- Always explain changed files and why they changed.
-- Always suggest a test or run command after changes.
-- Prefer research, backtesting, journaling, and paper-trading before any trading-related feature.
+- Explain every file changed and why.
+- Suggest a test or run command after changes.
+- Prefer research, backtesting, journaling, and paper-trading over execution features.
 
-## Safe Continuation Prompt
+## Review checklist
 
-Use this prompt with Codex or Copilot when continuing development:
+- Is the change research-only?
+- Does it preserve existing app functionality?
+- Is the code easy to understand?
+- Are the docs updated where needed?
+- Has a verification step been run?
+
+## Safety guardrails
+
+- No live account access
+- No broker integrations
+- No execution logic
+- No financial advice
+- No false claims about future performance
+
+## Safe continuation prompt
+
+Use this prompt when continuing development:
 
 ```text
 You are helping build AI Portfolio Research Copilot, a research-only Streamlit app for market study, notes, simple signals, backtesting, and paper-trading experiments.

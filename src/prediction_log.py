@@ -1,38 +1,38 @@
-from csv import DictReader, DictWriter
 from datetime import datetime
-from pathlib import Path
 
+from db_service import load_predictions as db_load_predictions
+from db_service import save_prediction as db_save_prediction
 from evaluation_engine import evaluate_prediction
-
-DATA_PATH = Path(__file__).resolve().parent.parent / "data"
-CSV_PATH = DATA_PATH / "prediction_log.csv"
-HEADERS = [
-    "date",
-    "symbol",
-    "signal",
-    "score",
-    "reasons",
-    "risks",
-    "price_at_signal",
-    "time_horizon",
-    "outcome",
-    "lesson",
-]
-
-
-def _ensure_file():
-    DATA_PATH.mkdir(parents=True, exist_ok=True)
-    if not CSV_PATH.exists():
-        with CSV_PATH.open("w", newline="", encoding="utf-8") as file:
-            writer = DictWriter(file, fieldnames=HEADERS)
-            writer.writeheader()
 
 
 def load_predictions():
-    """Load prediction log entries from CSV."""
-    _ensure_file()
-    with CSV_PATH.open("r", newline="", encoding="utf-8") as file:
-        return [row for row in DictReader(file)]
+    """Load prediction log entries from SQLite."""
+    rows = db_load_predictions()
+    normalized = []
+    for row in rows:
+        normalized.append(
+            {
+                "date": str(row.get("date", "")),
+                "symbol": str(row.get("symbol", "")),
+                "signal": str(row.get("signal", "")),
+                "score": str(row.get("score", "")),
+                "reasons": str(row.get("reasons", "")),
+                "risks": str(row.get("risks", "")),
+                "price_at_signal": str(row.get("price_at_signal", "")),
+                "time_horizon": str(row.get("time_horizon", "")),
+                "outcome": str(row.get("outcome", "")),
+                "lesson": str(row.get("lesson", "")),
+                "quant_score": str(row.get("quant_score", "")),
+                "news_score": str(row.get("news_score", "")),
+                "volatility": str(row.get("volatility", "")),
+                "max_drawdown": str(row.get("max_drawdown", "")),
+                "backtest_return": str(row.get("backtest_return", "")),
+                "suggested_action": str(row.get("suggested_action", "")),
+                "realized_return": str(row.get("realized_return", "")),
+                "evaluation_label": str(row.get("evaluation_label", "")),
+            }
+        )
+    return normalized
 
 
 def add_prediction(
@@ -45,9 +45,16 @@ def add_prediction(
     time_horizon="",
     outcome="",
     lesson="",
+    quant_score="",
+    news_score="",
+    volatility="",
+    max_drawdown="",
+    backtest_return="",
+    suggested_action="",
+    realized_return="",
+    evaluation_label="",
 ):
-    """Add a new prediction log entry."""
-    _ensure_file()
+    """Add a new prediction log entry in SQLite storage."""
     entry = {
         "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "symbol": symbol,
@@ -59,24 +66,38 @@ def add_prediction(
         "time_horizon": time_horizon,
         "outcome": outcome,
         "lesson": lesson,
+        "quant_score": str(quant_score),
+        "news_score": str(news_score),
+        "volatility": str(volatility),
+        "max_drawdown": str(max_drawdown),
+        "backtest_return": str(backtest_return),
+        "suggested_action": str(suggested_action),
+        "realized_return": str(realized_return),
+        "evaluation_label": str(evaluation_label),
     }
-    with CSV_PATH.open("a", newline="", encoding="utf-8") as file:
-        writer = DictWriter(file, fieldnames=HEADERS)
-        writer.writerow(entry)
+    db_save_prediction(**entry)
     return entry
 
 
-def update_prediction_outcome(index, outcome, lesson):
-    """Update the outcome and lesson for an existing prediction entry."""
+def update_prediction_outcome(
+    index,
+    outcome,
+    lesson,
+    realized_return=None,
+    evaluation_label=None,
+):
+    """Update outcome fields in-memory return (legacy helper retained)."""
     entries = load_predictions()
     if index < 0 or index >= len(entries):
         raise IndexError("Prediction entry index out of range")
     entries[index]["outcome"] = outcome
     entries[index]["lesson"] = lesson
-    with CSV_PATH.open("w", newline="", encoding="utf-8") as file:
-        writer = DictWriter(file, fieldnames=HEADERS)
-        writer.writeheader()
-        writer.writerows(entries)
+    if realized_return is not None:
+        entries[index]["realized_return"] = str(realized_return)
+    if evaluation_label is not None:
+        entries[index]["evaluation_label"] = evaluation_label
+    # Keep behavior simple: append updated snapshot row so learning views remain usable.
+    db_save_prediction(**entries[index])
     return entries[index]
 
 
