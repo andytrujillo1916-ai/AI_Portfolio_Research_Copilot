@@ -143,6 +143,7 @@ from ui_sections import (
     render_recommendation_logger,
     render_explainability_panel,
     render_timing_explanation,
+    render_trade_operations_cockpit,
     render_position_sizing_modes,
     render_etf_benchmark_dashboard,
     render_prediction_accuracy_dashboard,
@@ -949,6 +950,22 @@ with tab_portfolio:
     )
     render_broker_alert_tickets(final_recommendation)
     render_recommendation_logger(advisor_strategy, current_prices_by_symbol)
+    selected_existing_position = paper_positions.get("positions", {}).get(selected_asset, {})
+    render_trade_operations_cockpit(
+        selected_asset,
+        snapshot,
+        final_recommendation,
+        entry_exit_exec,
+        position_size_exec,
+        risk,
+        selected_data_quality_exec,
+        market_timing_context,
+        asset_class_context,
+        selected_existing_position,
+        paper_performance,
+        paper_positions,
+        research_mode=research_mode,
+    )
     render_quant_decision_intelligence(
         decision_ranked_assets,
         conviction_inputs,

@@ -17,6 +17,13 @@ from paper_trader import (
     load_paper_trades,
 )
 from trade_decision_assistant import generate_trade_decision
+from trade_operations_engine import (
+    assess_market_data_readiness,
+    build_order_intent,
+    build_trade_plan,
+    evaluate_autopilot_safety,
+    execute_paper_order_intent,
+)
 from evaluation_engine import evaluate_prediction
 from learning_engine import analyze_signal_effectiveness
 from regime_engine import detect_market_regime
@@ -2350,6 +2357,154 @@ def render_strategy_scorecard(paper_performance, benchmark_data, paper_positions
     st.write(scorecard.get("summary", "No scorecard summary available."))
     st.caption("Paper strategy evaluation only. No live trading, no broker APIs, no guaranteed alpha.")
     return scorecard
+
+
+def render_trade_operations_cockpit(
+    symbol,
+    snapshot,
+    final_recommendation,
+    entry_exit_data,
+    position_size_data,
+    risk,
+    data_quality,
+    market_timing,
+    asset_class_context,
+    existing_position,
+    paper_performance,
+    paper_positions,
+    research_mode="Balanced",
+):
+    """Render the paper-first trade operations cockpit."""
+    st.header("Trade Operations Cockpit")
+    st.caption(
+        "Turns research into audited trade plans and paper-only order intents. "
+        "Live broker execution is disabled."
+    )
+
+    asset_class_label = (asset_class_context or {}).get("asset_class", "Equity")
+    default_strategy = "Long Term" if final_recommendation.get("time_horizon") == "Long Term" else "Short Term"
+    strategy_type = st.selectbox(
+        "Plan type",
+        ["Short Term", "Long Term", "Futures Proxy", "Forex Research"],
+        index=["Short Term", "Long Term", "Futures Proxy", "Forex Research"].index(default_strategy)
+        if default_strategy in {"Short Term", "Long Term", "Futures Proxy", "Forex Research"}
+        else 0,
+        key=f"trade_ops_strategy_{symbol}",
+    )
+    if strategy_type in {"Futures Proxy", "Forex Research"}:
+        st.warning("Futures/forex remain research tracks only. No contracts, dealer routing, margin, leverage, or live orders.")
+
+    provider = assess_market_data_readiness(data_quality)
+    trade_plan = build_trade_plan(
+        symbol,
+        snapshot,
+        final_recommendation,
+        entry_exit_data,
+        position_size_data,
+        risk,
+        data_quality,
+        market_timing=market_timing,
+        asset_class=asset_class_label,
+        strategy_type=strategy_type,
+        existing_position=existing_position,
+    )
+    order_intent = build_order_intent(trade_plan, snapshot=snapshot, existing_position=existing_position)
+
+    controls = {}
+    with st.expander("Paper Autopilot Controls", expanded=True):
+        c1, c2, c3 = st.columns(3)
+        controls["max_daily_loss_pct"] = c1.number_input("Daily max loss %", min_value=0.1, value=2.0, step=0.1)
+        controls["max_weekly_loss_pct"] = c2.number_input("Weekly max loss %", min_value=0.1, value=5.0, step=0.1)
+        controls["max_trades_per_day"] = c3.number_input("Max trades/day", min_value=1, value=3, step=1)
+        c4, c5, c6 = st.columns(3)
+        controls["max_total_exposure_pct"] = c4.number_input("Max total exposure %", min_value=1.0, value=25.0, step=1.0)
+        controls["portfolio_value"] = c5.number_input("Paper portfolio value", min_value=1000.0, value=100000.0, step=1000.0)
+        controls["kill_switch"] = c6.checkbox("Emergency kill switch", value=False)
+
+    controls["current_exposure_pct"] = 0.0
+    if controls["portfolio_value"] > 0:
+        controls["current_exposure_pct"] = (
+            float((paper_positions or {}).get("market_value", 0.0)) / controls["portfolio_value"] * 100
+        )
+    safety = evaluate_autopilot_safety(
+        order_intent,
+        paper_performance=paper_performance,
+        paper_positions=paper_positions,
+        controls=controls,
+    )
+
+    st.subheader("Market Data Readiness")
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Tier", provider.get("data_tier", "Unknown"))
+    d2.metric("Paper allowed", "Yes" if provider.get("paper_allowed") else "No")
+    d3.metric("Live allowed", "Yes" if provider.get("live_allowed") else "No")
+    d4.metric("Bid/ask", "Yes" if provider.get("has_bid_ask") else "No")
+    st.write(provider.get("summary", "No provider summary."))
+    for item in provider.get("required_for_live", [])[:5]:
+        st.info(f"- {item}")
+
+    st.subheader("Trade Plan")
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("Status", trade_plan.get("status", "Draft"))
+    p2.metric("Final verdict", trade_plan.get("final_verdict", "Watch"))
+    p3.metric("Stop", f"${trade_plan.get('stop_loss', 0.0):,.2f}")
+    p4.metric("Target", f"${trade_plan.get('take_profit', 0.0):,.2f}")
+    st.write(trade_plan.get("summary", "No trade plan summary."))
+    st.write(f"Entry trigger: {trade_plan.get('entry_trigger', 'N/A')}")
+    st.write(f"Max holding window: {trade_plan.get('max_holding_window', 'N/A')}")
+    st.write(f"Next review: {trade_plan.get('next_review_time', 'N/A')}")
+    if trade_plan.get("long_term_action"):
+        st.write(f"Long-term action: {trade_plan.get('long_term_action')}")
+
+    c_exit, c_trim = st.columns(2)
+    with c_exit:
+        st.markdown("**Sell / invalidation triggers**")
+        for item in trade_plan.get("sell_triggers", []):
+            st.warning(f"- {item}")
+        st.markdown("**Invalidation**")
+        for item in trade_plan.get("invalidation_triggers", []):
+            st.info(f"- {item}")
+    with c_trim:
+        st.markdown("**Trim rules**")
+        for item in trade_plan.get("trim_rules", []):
+            st.success(f"- {item}")
+        st.markdown("**Exit plan**")
+        st.write(trade_plan.get("exit_plan", "No exit plan."))
+
+    st.subheader("Order Intent")
+    o1, o2, o3, o4 = st.columns(4)
+    o1.metric("Intent", order_intent.get("intent_type", "none"))
+    o2.metric("Quantity", order_intent.get("quantity", 0.0))
+    o3.metric("Limit", f"${order_intent.get('limit_price', 0.0):,.2f}")
+    o4.metric("Safety", "Pass" if safety.get("allowed") else "Blocked")
+    st.write(order_intent.get("summary", "No order intent summary."))
+    if order_intent.get("live_blockers"):
+        st.markdown("**Live blockers**")
+        for item in order_intent.get("live_blockers", []):
+            st.error(f"- {item}")
+
+    st.markdown("**Autopilot safety passed**")
+    for item in safety.get("passed", []):
+        st.success(f"- {item}")
+    st.markdown("**Autopilot safety failed**")
+    for item in safety.get("failed", []):
+        st.warning(f"- {item}")
+
+    if st.button("Execute Paper Order Intent", key=f"execute_trade_ops_{symbol}"):
+        result = execute_paper_order_intent(order_intent, safety)
+        if result.get("saved"):
+            st.success(result.get("message", "Paper order saved."))
+            st.write(result.get("trade", {}))
+        else:
+            st.info(result.get("message", "No paper order saved."))
+
+    st.caption("Paper-autopilot only. No broker APIs, live orders, margin, futures contracts, forex routing, shorts, options, or leverage.")
+    return {
+        "provider_readiness": provider,
+        "trade_plan": trade_plan,
+        "order_intent": order_intent,
+        "safety": safety,
+    }
 
 
 def render_auto_paper_trading_control_panel(
