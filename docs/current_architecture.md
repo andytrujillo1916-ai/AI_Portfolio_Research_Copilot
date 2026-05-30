@@ -31,6 +31,9 @@ The Copilot is a Streamlit-based research dashboard that combines market data, s
 - `render_asset_comparison()` — multi-asset comparison chart
 - `render_research_notes()` — user-entered notes display
 - `render_research_agent()` — rule-based bull/bear cases
+- `render_research_packet_exporter()` — Markdown download for a research-only packet
+- `render_research_quality_audit()` — checklist for data quality, evidence, and research-only guardrails
+- `render_market_stress_research()` — proxy-only Crash Watch hypothesis panel
 - `render_signal_engine()` — quant + news composite signal with save-to-log form
 - `render_news_intelligence()` — recent headlines, sentiment, event tags, risk flags
 - `render_prediction_log()` — stored signals with outcomes
@@ -46,6 +49,8 @@ The Copilot is a Streamlit-based research dashboard that combines market data, s
 - `news_engine` → news context
 - `backtester` → backtest results
 - `journal` → thesis storage
+- `research_packet_exporter` → Markdown packet builder with fallback/mock data notes
+- `market_stress_engine` → ETF/proxy stress posture for crash-risk hypothesis testing
 
 ---
 

@@ -11,6 +11,10 @@ def _safe_str(value):
     return str(value) if value is not None else ""
 
 
+def _bounded_adjustment(value, low=0.85, high=1.10):
+    return round(max(low, min(high, float(value))), 2)
+
+
 def calculate_factor_insights(predictions, research_runs):
     """Create simple, rule-based adaptive insights from saved predictions and research runs."""
     positive_outcomes = []
@@ -55,19 +59,19 @@ def calculate_factor_insights(predictions, research_runs):
 
     if positive_news >= 4 and positive_news > negative_news:
         strong_positive_factors.append("Bullish news context has often lined up with successful outcomes.")
-        suggested_weight_adjustments["news_score"] = 1.05
+        suggested_weight_adjustments["news_score"] = _bounded_adjustment(1.05)
 
     if positive_backtest >= 2 and positive_backtest > negative_backtest:
         strong_positive_factors.append("Positive backtest results have been useful in past research runs.")
-        suggested_weight_adjustments["quant_score"] = 1.03
+        suggested_weight_adjustments["quant_score"] = _bounded_adjustment(1.03)
 
     if negative_vol >= 25 and negative_vol > positive_vol:
         weak_negative_factors.append("High volatility has often been associated with weak outcomes.")
-        suggested_weight_adjustments["volatility"] = 0.92
+        suggested_weight_adjustments["volatility"] = _bounded_adjustment(0.92)
 
     if negative_drawdown >= 15 and negative_drawdown > positive_drawdown:
         weak_negative_factors.append("Large drawdowns have often weakened the quality of bullish setups.")
-        suggested_weight_adjustments["max_drawdown"] = 0.93
+        suggested_weight_adjustments["max_drawdown"] = _bounded_adjustment(0.93)
 
     for run in research_runs:
         regime = _safe_str(run.get("regime"))
@@ -78,7 +82,9 @@ def calculate_factor_insights(predictions, research_runs):
             strong_positive_factors.append("Low-to-moderate exposure in bull regimes looks more practical than aggressive sizing.")
         if regime == "High Volatility" and decision == "Buy":
             weak_negative_factors.append("Buy decisions in high-volatility regimes have been weaker than expected.")
-            suggested_weight_adjustments["volatility"] = min(suggested_weight_adjustments["volatility"], 0.90)
+            suggested_weight_adjustments["volatility"] = _bounded_adjustment(
+                min(suggested_weight_adjustments["volatility"], 0.90)
+            )
 
     if not strong_positive_factors:
         strong_positive_factors.append("No strong positive pattern was clear from the current sample.")
@@ -95,14 +101,42 @@ def calculate_factor_insights(predictions, research_runs):
     if len(strong_positive_factors) >= 2 and len(weak_negative_factors) >= 2:
         learning_confidence = min(10, learning_confidence + 1)
 
+    reviewable_adjustments = []
+    for factor, adjustment in suggested_weight_adjustments.items():
+        bounded = _bounded_adjustment(adjustment)
+        suggested_weight_adjustments[factor] = bounded
+        if bounded > 1.0:
+            direction = "slightly increase"
+        elif bounded < 1.0:
+            direction = "slightly reduce"
+        else:
+            direction = "keep unchanged"
+        reviewable_adjustments.append(
+            {
+                "factor": factor,
+                "adjustment": bounded,
+                "direction": direction,
+                "reason": (
+                    "Review this suggestion manually before changing scoring logic. "
+                    "It is based on saved outcomes, not a self-modifying model."
+                ),
+            }
+        )
+
     summary = (
-        "This is a simple rule-based adaptation. It uses past prediction outcomes and saved research-run context to make small, reviewable adjustments only."
+        "This is a simple rule-based adaptation. It uses past prediction outcomes and saved research-run context "
+        "to make small, bounded, reviewable suggestions only. It does not rewrite code or execute trades."
     )
 
     return {
         "strong_positive_factors": strong_positive_factors,
         "weak_negative_factors": weak_negative_factors,
         "suggested_weight_adjustments": suggested_weight_adjustments,
+        "reviewable_adjustments": reviewable_adjustments,
         "learning_confidence": learning_confidence,
+        "sample_size": total_samples,
+        "disclaimer": (
+            "Research-only recursive learning. Suggestions require human review and do not guarantee future performance."
+        ),
         "summary": summary,
     }

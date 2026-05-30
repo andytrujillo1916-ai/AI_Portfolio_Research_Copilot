@@ -15,6 +15,7 @@ I built this project to practice full-stack quant research engineering: turning 
 - Opportunity ranking, conviction scoring, and execution readiness
 - Position sizing, entry/exit framework, and exposure controls
 - Meta decision layer, sub-agent review board, and executive dashboard
+- Markdown research packet export with fallback/mock data notes
 - Research logging, health checks, and workflow orchestration
 
 ## Architecture Overview
@@ -27,6 +28,7 @@ The app uses a modular engine pattern:
 - `tests/`: lightweight validation of core engine behavior
 
 Detailed architecture notes are in [docs/current_architecture.md](docs/current_architecture.md).
+Beginner-friendly system notes are in [docs/MARKET_RESEARCH_SYSTEM_GUIDE.md](docs/MARKET_RESEARCH_SYSTEM_GUIDE.md).
 
 ## Screenshots
 

@@ -161,3 +161,127 @@ def generate_portfolio_allocation(
         "portfolio_risk_level": risk_level,
         "summary": summary,
     }
+
+
+def optimize_portfolio(
+    ranked_assets,
+    research_mode="Balanced",
+    max_single_position=0.15,
+    cash_buffer=0.10,
+):
+    """Convert ranked research assets into transparent research-only allocation targets."""
+    ranked_assets = ranked_assets or []
+    if not ranked_assets:
+        return {
+            "recommended_allocations": [],
+            "cash_allocation_pct": round(cash_buffer * 100, 2),
+            "portfolio_risk_level": "Low",
+            "concentration_warning": "No ranked assets were provided.",
+            "summary": "Portfolio optimizer stayed mostly in cash due to missing ranked inputs.",
+        }
+
+    mode = str(research_mode or "Balanced")
+    mode_cash = cash_buffer
+    mode_cap = max_single_position
+    upside_mult = 1.0
+    risk_mult = 1.0
+
+    if mode == "Conservative":
+        mode_cash = max(cash_buffer, 0.20)
+        mode_cap = min(max_single_position, 0.10)
+        risk_mult = 1.25
+    elif mode == "Aggressive":
+        mode_cash = min(cash_buffer, 0.05)
+        mode_cap = max(max_single_position, 0.20)
+        upside_mult = 1.10
+        risk_mult = 0.90
+
+    investable_pct = max(0.0, 1.0 - mode_cash)
+    scored = []
+    for row in ranked_assets:
+        symbol = row.get("symbol", "")
+        conviction = _safe_float(row.get("conviction", row.get("opportunity_score", row.get("score", 50.0))))
+        volatility = _safe_float(row.get("volatility_pct", 0.0))
+        drawdown = abs(_safe_float(row.get("max_drawdown_pct", 0.0)))
+        regime = str(row.get("regime", "Unknown"))
+
+        base = conviction * upside_mult
+        base -= volatility * 0.55 * risk_mult
+        base -= drawdown * 0.35 * risk_mult
+        if regime in {"Bear Trend", "High Volatility"}:
+            base -= 6
+        elif regime in {"Bull Trend", "Recovery"}:
+            base += 4
+
+        scored.append(
+            {
+                "symbol": symbol,
+                "score": max(0.0, min(base, 100.0)),
+                "volatility_pct": volatility,
+                "max_drawdown_pct": drawdown,
+                "conviction": conviction,
+            }
+        )
+
+    scored = [row for row in scored if row["score"] > 0]
+    if not scored:
+        return {
+            "recommended_allocations": [],
+            "cash_allocation_pct": round(mode_cash * 100, 2),
+            "portfolio_risk_level": "Low",
+            "concentration_warning": "All assets were penalized to zero by current risk settings.",
+            "summary": "No risk-adjusted allocations were produced in this pass.",
+        }
+
+    total_score = sum(row["score"] for row in scored)
+    allocations = []
+    for row in scored:
+        raw_weight = (row["score"] / total_score) * investable_pct
+        capped = min(raw_weight, mode_cap)
+        allocations.append(
+            {
+                "symbol": row["symbol"],
+                "allocation_pct": capped * 100,
+                "reason": (
+                    f"Conviction {row['conviction']:.1f}, volatility {row['volatility_pct']:.2f}%, "
+                    f"drawdown {row['max_drawdown_pct']:.2f}%."
+                ),
+            }
+        )
+
+    allocated = sum(row["allocation_pct"] for row in allocations)
+    target_allocated = investable_pct * 100
+    if allocated > 0:
+        scale = target_allocated / allocated
+        for row in allocations:
+            row["allocation_pct"] = round(row["allocation_pct"] * scale, 2)
+
+    allocations.sort(key=lambda row: row.get("allocation_pct", 0), reverse=True)
+
+    top_weight = allocations[0]["allocation_pct"] if allocations else 0.0
+    top3_weight = sum(row["allocation_pct"] for row in allocations[:3])
+    if top_weight > (mode_cap * 100):
+        concentration_warning = "Top position exceeds requested cap."
+    elif top3_weight > 60:
+        concentration_warning = "Top 3 allocations are concentrated; review diversification."
+    else:
+        concentration_warning = "No major concentration warning."
+
+    avg_vol = sum(row["volatility_pct"] for row in scored) / len(scored)
+    if avg_vol >= 30:
+        risk_level = "High"
+    elif avg_vol >= 18:
+        risk_level = "Moderate"
+    else:
+        risk_level = "Low"
+
+    return {
+        "recommended_allocations": allocations,
+        "cash_allocation_pct": round(mode_cash * 100, 2),
+        "portfolio_risk_level": risk_level,
+        "concentration_warning": concentration_warning,
+        "summary": (
+            f"{mode} mode optimizer allocated {target_allocated:.0f}% across ranked assets "
+            f"with a {mode_cash*100:.0f}% cash buffer. Research-only, no execution."
+        ),
+    }

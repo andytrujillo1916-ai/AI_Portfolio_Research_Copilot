@@ -39,6 +39,11 @@ def build_auto_paper_trade_ticket(
     data_confidence="Medium",
     existing_position=None,
     research_mode="Balanced",
+    final_recommendation=None,
+    alert_ticket_id=None,
+    agent_task_id=None,
+    portfolio_action_id=None,
+    buy_finder_rank=None,
 ):
     """Build a simulated trade ticket from the full research gate stack."""
     snapshot = snapshot or {}
@@ -50,6 +55,7 @@ def build_auto_paper_trade_ticket(
     correlation_data = correlation_data or {}
     benchmark_data = benchmark_data or {}
     existing_position = existing_position or {}
+    final_recommendation = final_recommendation or {}
 
     price = _safe_float(snapshot.get("price", 0.0))
     position_pct = _safe_float(position_size_data.get("recommended_position_pct", 0.0))
@@ -60,6 +66,7 @@ def build_auto_paper_trade_ticket(
     exposure_status = exposure_limits_data.get("exposure_status", "Moderate")
     diversification = _safe_float(correlation_data.get("diversification_score", 50.0))
     entry_action = entry_exit_data.get("recommended_action", "Watch")
+    source_verdict = final_recommendation.get("final_verdict", "")
 
     passed = []
     failed = []
@@ -69,7 +76,15 @@ def build_auto_paper_trade_ticket(
     else:
         failed.append("Data confidence is Low.")
 
-    if final_verdict in {"Research Candidate", "Strong Research Candidate"}:
+    if final_recommendation:
+        if final_recommendation.get("paper_trade_eligible"):
+            passed.append(f"Final verdict allows paper simulation: {source_verdict}.")
+        else:
+            failed.append(f"Final verdict blocks paper simulation: {source_verdict or 'N/A'}.")
+
+    if final_recommendation:
+        passed.append(f"Using Final Verdict as source of truth: {source_verdict or 'N/A'}.")
+    elif final_verdict in {"Research Candidate", "Strong Research Candidate"}:
         passed.append(f"Meta verdict is {final_verdict}.")
     else:
         failed.append(f"Meta verdict is {final_verdict}.")
@@ -98,7 +113,15 @@ def build_auto_paper_trade_ticket(
     quantity = 0.0
     reason = "Full gate stack did not pass."
 
-    if entry_action in {"Trim", "Exit"} and existing_shares > 0:
+    if final_recommendation and source_verdict in {"Trim", "Sell Candidate"} and existing_shares > 0:
+        action = "Trim" if source_verdict == "Trim" else "Exit"
+        quantity = round(existing_shares * (0.5 if action == "Trim" else 1.0), 4)
+        reason = f"Final verdict triggered {action} paper simulation."
+    elif final_recommendation and source_verdict in {"Buy Candidate", "Add"} and not failed and price > 0:
+        action = "Enter Paper Trade"
+        quantity = round(position_value / price, 4)
+        reason = f"Final verdict {source_verdict} passed paper simulation gates."
+    elif entry_action in {"Trim", "Exit"} and existing_shares > 0:
         action = "Trim" if entry_action == "Trim" else "Exit"
         quantity = round(existing_shares * (0.5 if action == "Trim" else 1.0), 4)
         reason = f"{entry_action} triggered by entry/exit framework."
@@ -124,6 +147,17 @@ def build_auto_paper_trade_ticket(
         "benchmark_context": f"Compared against best ETF benchmark: {best_benchmark}.",
         "data_confidence": data_confidence,
         "research_mode": research_mode,
+        "final_verdict_id": final_recommendation.get("id", ""),
+        "final_verdict": source_verdict or final_verdict,
+        "conflict_summary": final_recommendation.get("conflict_summary", ""),
+        "alert_ticket_id": alert_ticket_id,
+        "agent_task_id": agent_task_id or final_recommendation.get("agent_task_id", ""),
+        "portfolio_action_id": portfolio_action_id or final_recommendation.get("portfolio_action_id", ""),
+        "buy_finder_rank": buy_finder_rank or final_recommendation.get("buy_finder_rank", ""),
+        "market_regime": final_recommendation.get("market_regime", ""),
+        "strategic_buy_zone": final_recommendation.get("strategic_buy_zone", ""),
+        "source_confidence": final_recommendation.get("source_confidence", data_confidence),
+        "paper_trade_eligible": bool(final_recommendation.get("paper_trade_eligible", not failed)),
         "disclaimer": "Simulated paper trade only. No broker APIs, live trading, leverage, shorts, or real execution.",
     }
 
@@ -136,6 +170,8 @@ def save_auto_paper_trade(ticket):
 
     if action not in {"buy", "sell"}:
         return {"saved": False, "message": "No simulated trade was saved because action is not actionable."}
+    if ticket.get("paper_trade_eligible") is False:
+        return {"saved": False, "message": "Final verdict marked this ticket ineligible for paper trading."}
     if _has_same_day_trade(symbol, action):
         return {"saved": False, "message": "Duplicate same-day simulated trade blocked."}
     if _safe_float(ticket.get("quantity", 0.0)) <= 0 or _safe_float(ticket.get("price", 0.0)) <= 0:

@@ -5,8 +5,9 @@ def generate_signal(
     news_context=None,
     adaptive_context=None,
     asset_class=None,
+    alternative_data_context=None,
 ):
-    """Generate a simple rule-based research signal with optional adaptive tuning."""
+    """Generate a simple rule-based research signal with optional supporting context."""
 
     def _apply_adaptive_adjustments(quant_score, news_score, volatility_pct, max_drawdown_pct):
         if not adaptive_context:
@@ -87,6 +88,28 @@ def generate_signal(
         risk_flags = news_context.get("risk_flags", [])
         news_score -= 3 * len(risk_flags)
 
+    alternative_data_score = 0
+    if alternative_data_context:
+        alt_score = alternative_data_context.get("alternative_data_score", 50)
+        risk_flags = alternative_data_context.get("risk_flags", [])
+        if alt_score >= 65:
+            alternative_data_score += 3
+            reasons.append(
+                "Alternative data context is modestly supportive, used only as supporting evidence."
+            )
+        elif alt_score <= 40:
+            alternative_data_score -= 3
+            risks.append(
+                "Alternative data context is weak or noisy, so the signal receives a small penalty."
+            )
+
+        if risk_flags:
+            penalty = min(len(risk_flags), 3)
+            alternative_data_score -= penalty
+            risks.append(
+                "Alternative data has risk flags; delayed/noisy data keeps the weight small."
+            )
+
     quant_score, news_score = _apply_adaptive_adjustments(
         quant_score,
         news_score,
@@ -94,7 +117,7 @@ def generate_signal(
         max_drawdown_pct,
     )
 
-    raw_score = quant_score + news_score
+    raw_score = quant_score + news_score + alternative_data_score
     final_score = max(0, min(100, int(round(raw_score))))
 
     if final_score >= 80:
@@ -117,6 +140,7 @@ def generate_signal(
         "score": final_score,
         "quant_score": int(round(quant_score)),
         "news_score": int(round(news_score)),
+        "alternative_data_score": int(round(alternative_data_score)),
         "reasons": reasons,
         "risks": risks,
     }

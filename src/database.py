@@ -111,7 +111,177 @@ def _initialize_tables(connection):
         """
     )
 
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS financial_profile (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            cash REAL,
+            monthly_income REAL,
+            monthly_expenses REAL,
+            emergency_fund REAL,
+            debt REAL,
+            investment_horizon TEXT,
+            risk_tolerance TEXT,
+            liquidity_needs TEXT,
+            goals TEXT,
+            tax_account_type TEXT,
+            max_single_stock_exposure REAL,
+            max_sector_exposure REAL,
+            updated_at TEXT
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS real_holdings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT UNIQUE,
+            shares REAL,
+            cost_basis REAL,
+            account_type TEXT,
+            current_value REAL,
+            target_notes TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS recommendation_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT,
+            date TEXT,
+            action TEXT,
+            horizon TEXT,
+            score REAL,
+            price REAL,
+            engine_inputs TEXT,
+            data_gate TEXT,
+            suitability_status TEXT,
+            sector TEXT,
+            market_regime TEXT,
+            benchmark_symbol TEXT,
+            benchmark_return_pct REAL,
+            outcome_price REAL,
+            realized_return_pct REAL,
+            max_drawdown_after_signal REAL,
+            alpha_vs_benchmark_pct REAL,
+            outcome_label TEXT,
+            lesson TEXT,
+            evaluation_date TEXT
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS broker_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT,
+            action TEXT,
+            confidence TEXT,
+            ticket_details TEXT,
+            status TEXT,
+            created_at TEXT,
+            resolved_at TEXT,
+            outcome_notes TEXT
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_research_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT,
+            task_type TEXT,
+            priority TEXT,
+            assigned_agent_role TEXT,
+            status TEXT,
+            due_check_date TEXT,
+            findings TEXT,
+            linked_final_verdict TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT,
+            run_type TEXT,
+            lane TEXT,
+            started_at TEXT,
+            completed_at TEXT,
+            data_confidence TEXT,
+            final_verdict TEXT,
+            confidence TEXT,
+            score REAL,
+            summary TEXT,
+            thesis_snapshot TEXT,
+            memory_delta TEXT,
+            human_review_required INTEGER
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_evidence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER,
+            agent_name TEXT,
+            status TEXT,
+            score REAL,
+            key_points TEXT,
+            concerns TEXT,
+            sources_used TEXT,
+            memory_references TEXT,
+            recommendation TEXT,
+            created_at TEXT,
+            FOREIGN KEY(run_id) REFERENCES agent_runs(id)
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ticker_narrative_memory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT UNIQUE,
+            thesis TEXT,
+            bull_case TEXT,
+            bear_case TEXT,
+            last_verdict TEXT,
+            last_lane TEXT,
+            lessons TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+
+    _ensure_columns(
+        cursor,
+        "recommendation_log",
+        {
+            "evaluation_date": "TEXT",
+        },
+    )
+
     connection.commit()
+
+
+def _ensure_columns(cursor, table_name, columns):
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    existing = {row[1] for row in cursor.fetchall()}
+    for column, definition in columns.items():
+        if column not in existing:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column} {definition}")
 
 
 def get_db_connection():
@@ -127,7 +297,21 @@ def get_database_status():
     """Return connectivity and row counts for core research tables."""
     checks = []
     row_counts = {}
-    tables = ["assets", "research_runs", "predictions", "theses", "paper_trades"]
+    tables = [
+        "assets",
+        "research_runs",
+        "predictions",
+        "theses",
+        "paper_trades",
+        "financial_profile",
+        "real_holdings",
+        "recommendation_log",
+        "broker_alerts",
+        "agent_research_queue",
+        "agent_runs",
+        "agent_evidence",
+        "ticker_narrative_memory",
+    ]
 
     try:
         with get_db_connection() as connection:

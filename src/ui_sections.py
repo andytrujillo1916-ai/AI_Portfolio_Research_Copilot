@@ -1,6 +1,8 @@
+import json
+
 import streamlit as st
 
-from market_data import get_asset_comparison, get_risk_metrics
+from market_data import get_asset_comparison, get_market_snapshot, get_risk_metrics
 from journal import add_journal_entry, load_journal
 from prediction_log import add_prediction, evaluate_all_predictions, load_predictions
 from research_agent import generate_research_summary
@@ -57,6 +59,7 @@ from execution_engine import evaluate_execution_readiness
 from position_sizing_engine import calculate_position_size as calculate_position_size_v1
 from entry_exit_engine import generate_entry_exit_plan
 from asset_class_engine import classify_asset
+from asset_sector_map import map_asset_to_sector
 from exposure_limits_engine import evaluate_portfolio_exposure_limits
 from correlation_engine import analyze_cross_asset_correlation
 from capital_hierarchy_engine import build_capital_allocation_hierarchy
@@ -67,11 +70,78 @@ from database import get_database_status
 from workflow_orchestrator import run_research_workflow as run_orchestrated_workflow
 from subagent_engine import run_subagent_reviews
 from executive_dashboard_engine import generate_executive_summary
-from data_quality_engine import summarize_data_sources
+from data_quality_engine import evaluate_data_quality, summarize_data_sources
+from data_source_registry import list_data_sources
 from opportunistic_screener_engine import rank_opportunistic_stocks
 from benchmark_basket_engine import find_best_etf_benchmark
 from strategy_scorecard_engine import generate_strategy_scorecard
 from auto_paper_trader import build_auto_paper_trade_ticket, save_auto_paper_trade
+from prediction_accuracy_engine import evaluate_prediction_accuracy
+from benchmark_engine import compare_to_benchmarks
+from walk_forward_engine import run_walk_forward_validation
+from leaderboard_engine import build_strategy_leaderboard
+from experiment_tracker import (
+    compare_experiment_results,
+    load_experiments,
+    save_experiment,
+    update_experiment_result,
+)
+from research_review_agent import generate_research_review
+from governance_engine import run_governance_review
+from explainable_quant_engine import (
+    build_ranked_decision_table,
+    calculate_explainability_panel,
+    compare_etf_benchmarks,
+    generate_position_sizing_modes,
+    generate_timing_explanation,
+)
+from decision_intelligence import build_quant_decision_intelligence
+from alternative_data_engine import generate_alternative_data_context
+from db_service import (
+    delete_real_holding,
+    load_agent_evidence,
+    load_agent_runs,
+    load_agent_research_tasks,
+    load_broker_alerts,
+    load_financial_profile,
+    load_recommendation_log,
+    load_real_holdings,
+    load_ticker_memory,
+    save_agent_run,
+    save_agent_evidence,
+    save_agent_research_task,
+    save_broker_alert,
+    save_financial_profile,
+    save_real_holding,
+    save_recommendation_log,
+    save_ticker_memory,
+    update_agent_research_task,
+    update_broker_alert_status,
+    update_recommendation_outcome,
+)
+from final_recommendation_engine import build_final_recommendation
+from ipo_research_engine import generate_ipo_research_context
+from portfolio_strategy_engine import build_portfolio_strategy
+from fundamental_catalyst_engine import generate_fundamental_catalyst_context
+from recommendation_accuracy_engine import (
+    build_learning_dashboard_context,
+    build_research_process_audit,
+    evaluate_recommendation_accuracy,
+)
+from sp500_universe import get_sp500_style_symbols, get_sp500_style_universe
+from opportunity_universe import build_opportunity_universe, get_opportunity_symbols
+from growth_discovery_engine import score_growth_discovery
+from market_timing_engine import build_market_timing_context
+from buy_finder_engine import build_buy_finder, build_portfolio_action_plan
+from agent_research_engine import generate_agent_research_tasks
+from agent_research_desk import (
+    evaluate_agent_research_memory,
+    generate_daily_agent_queue,
+    run_agent_research_desk,
+)
+from best_opportunities_engine import rank_best_opportunities, run_any_ticker_research
+from research_packet_exporter import build_research_packet_markdown
+from market_stress_engine import analyze_market_stress
 
 
 def render_market_snapshot(snapshot, shares):
@@ -102,6 +172,38 @@ def render_market_snapshot(snapshot, shares):
     return position_value
 
 
+def render_research_packet_exporter(
+    symbol,
+    snapshot,
+    risk,
+    news_context,
+    signal_data,
+    backtest_results,
+    portfolio_comparison,
+):
+    """Render a Markdown research-packet download button."""
+    st.header("Research Packet Exporter")
+    packet = build_research_packet_markdown(
+        symbol,
+        snapshot,
+        risk,
+        news_context,
+        signal_data,
+        backtest_results,
+        portfolio_comparison,
+    )
+    st.download_button(
+        "Download Markdown Research Packet",
+        data=packet,
+        file_name=f"{str(symbol or 'asset').upper()}_research_packet.md",
+        mime="text/markdown",
+    )
+    st.caption(
+        "Research-only export. No financial advice, no broker APIs, no live trading, and no guaranteed returns."
+    )
+    return packet
+
+
 def render_macro_dashboard(research_mode):
     """Render simple research-only macro context."""
     macro = generate_macro_context(research_mode=research_mode)
@@ -125,6 +227,107 @@ def render_macro_dashboard(research_mode):
     st.caption(
         "Research-only macro layer. This is not live forecasting and does not execute trades."
     )
+
+
+def render_research_quality_audit(
+    selected_asset,
+    snapshot,
+    price_data,
+    prediction_summary=None,
+    stress_context=None,
+):
+    """Render a plain-English research quality checklist."""
+    st.header("Research Quality Audit")
+    st.caption(
+        "Checks whether the workflow is evidence-aware, research-only, and honest about data quality."
+    )
+
+    prediction_summary = prediction_summary or {}
+    stress_context = stress_context or {}
+    snapshot_source = snapshot.get("source", "unknown") if isinstance(snapshot, dict) else "unknown"
+    price_source = price_data.get("source", "unknown") if isinstance(price_data, dict) else "unknown"
+    fallback_used = bool(
+        (isinstance(snapshot, dict) and (snapshot.get("is_fallback") or snapshot_source == "mock"))
+        or (isinstance(price_data, dict) and (price_data.get("is_fallback") or price_source == "mock"))
+    )
+    sample_confidence = prediction_summary.get("sample_confidence", "No evidence yet")
+    stress_posture = stress_context.get("risk_posture", "Needs More Data")
+
+    checklist = [
+        {
+            "check": "Research-only guardrails",
+            "status": "Pass",
+            "detail": "No broker APIs, live trading, order placement, or guaranteed-return claims are needed for this workflow.",
+        },
+        {
+            "check": "Data source visibility",
+            "status": "Review" if fallback_used else "Pass",
+            "detail": (
+                f"{selected_asset} snapshot source: {snapshot_source}; price source: {price_source}. "
+                "Fallback/mock data is being used."
+                if fallback_used
+                else f"{selected_asset} snapshot source: {snapshot_source}; price source: {price_source}."
+            ),
+        },
+        {
+            "check": "Prediction evidence",
+            "status": "Review" if sample_confidence in {"No evidence yet", "Not enough evidence"} else "Pass",
+            "detail": f"Prediction sample confidence: {sample_confidence}.",
+        },
+        {
+            "check": "Crash hypothesis discipline",
+            "status": "Review" if stress_posture in {"Stress", "Needs More Data"} else "Pass",
+            "detail": f"Crash Watch posture: {stress_posture}. Treat crash calls as hypotheses, not certainty.",
+        },
+        {
+            "check": "Futures scope",
+            "status": "Pass",
+            "detail": "Futures stay proxy-only in this version; no futures contracts, margin, leverage, or execution logic.",
+        },
+    ]
+
+    st.dataframe(checklist, width="stretch")
+    if fallback_used:
+        st.warning("Fallback/mock data is present. Use this output for learning only until data quality improves.")
+    st.info(
+        "Best practice: compare every thesis to ETF baselines, test out-of-sample when possible, save predictions, then review what actually happened."
+    )
+    return {"checks": checklist, "fallback_used": fallback_used, "sample_confidence": sample_confidence}
+
+
+def render_market_stress_research(period="3mo"):
+    """Render broad-market crash-risk hypothesis testing with proxies only."""
+    st.header("Crash Watch Research Panel")
+    st.caption(
+        "Proxy-only market stress research. This is not a crash prediction, financial advice, or trade instruction."
+    )
+
+    stress = analyze_market_stress(period=period)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Risk posture", stress.get("risk_posture", "Needs More Data"))
+    col2.metric("Stress score", f"{stress.get('stress_score', 0.0):.1f}/100")
+    col3.metric("Risk-on breadth", f"{stress.get('breadth_pct', 0.0):.1f}%")
+    col4.metric("Fallback rows", stress.get("fallback_count", 0))
+
+    col5, col6, col7 = st.columns(3)
+    col5.metric("Deteriorating proxies", stress.get("deteriorating_count", 0))
+    col6.metric("Credit proxy", stress.get("credit_risk_proxy", "Unknown"))
+    col7.metric("Volatility proxy", stress.get("volatility_proxy", "Unknown"))
+
+    if stress.get("fallback_count", 0):
+        st.warning("Some Crash Watch inputs use fallback/mock/error data. Treat the posture as low-confidence.")
+    if stress.get("defensive_rotation"):
+        st.info("Defensive proxies are outperforming SPY in this sample, which can indicate caution.")
+
+    rows = stress.get("rows", [])
+    if rows:
+        st.dataframe(rows, width="stretch")
+    else:
+        st.write("No market stress proxy rows available.")
+
+    st.write(stress.get("interpretation", "No stress interpretation available."))
+    st.caption(stress.get("disclaimer", "Research-only market stress context."))
+    return stress
 
 
 def render_asset_class_context(symbol, asset_class_context=None):
@@ -357,6 +560,105 @@ def render_walk_forward_section(price_data):
     st.dataframe(table_rows, width="stretch")
 
 
+def render_walk_forward_validation(
+    watchlist,
+    research_mode,
+    train_window_days=60,
+    test_window_days=20,
+    period="1y",
+):
+    """Render rolling walk-forward validation versus SPY benchmark."""
+    validation = run_walk_forward_validation(
+        watchlist,
+        research_mode=research_mode,
+        train_window_days=train_window_days,
+        test_window_days=test_window_days,
+        period=period,
+    )
+
+    st.header("Walk-Forward Validation")
+    total_windows = validation.get("total_windows", 0)
+    if total_windows == 0:
+        st.write("Not enough data to run walk-forward validation.")
+        st.write(validation.get("summary", "No validation summary available."))
+        st.caption(
+            "Research-only validation. Historical rolling results do not guarantee future performance."
+        )
+        return validation
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total windows", total_windows)
+    col2.metric("Win rate vs SPY", f"{validation.get('win_rate_vs_spy', 0.0):.2f}%")
+    col3.metric("Average alpha vs SPY", f"{validation.get('average_alpha_vs_spy', 0.0):+.2f}%")
+
+    best = validation.get("best_window", {})
+    worst = validation.get("worst_window", {})
+    col4, col5 = st.columns(2)
+    col4.metric(
+        "Best window alpha",
+        f"{best.get('alpha_vs_spy_pct', 0.0):+.2f}%",
+    )
+    col5.metric(
+        "Worst window alpha",
+        f"{worst.get('alpha_vs_spy_pct', 0.0):+.2f}%",
+    )
+
+    window_rows = validation.get("window_results", [])
+    if window_rows:
+        st.dataframe(window_rows[-10:], width="stretch")
+    else:
+        st.write("No window-level results were produced.")
+
+    st.write(validation.get("summary", "No validation summary available."))
+    st.caption(
+        "Research-only validation and not guaranteed future performance. No broker APIs, no live trading, and no auto execution."
+    )
+    return validation
+
+
+def render_strategy_leaderboard(
+    walk_forward_results,
+    prediction_evaluations=None,
+    research_run_evaluations=None,
+):
+    """Render a cross-layer leaderboard for strategy/signal/research-mode performance."""
+    board = build_strategy_leaderboard(
+        walk_forward_results,
+        prediction_evaluations=prediction_evaluations,
+        research_run_evaluations=research_run_evaluations,
+    )
+
+    st.header("Model / Strategy Leaderboard")
+    rows = board.get("leaderboard", [])
+    if rows:
+        st.dataframe(rows, width="stretch")
+    else:
+        st.write("No leaderboard rows are available yet.")
+        st.write(board.get("learning_summary", "No learning summary available."))
+        st.caption(
+            "Historical research-only results; not a guarantee of future performance."
+        )
+        return board
+
+    top = board.get("top_performer", {})
+    worst = board.get("worst_performer", {})
+    col1, col2 = st.columns(2)
+    col1.metric(
+        "Top performer",
+        f"{top.get('name', 'N/A')} ({top.get('consistency_score', 0):.1f})",
+    )
+    col2.metric(
+        "Worst performer",
+        f"{worst.get('name', 'N/A')} ({worst.get('consistency_score', 0):.1f})",
+    )
+
+    st.write(board.get("learning_summary", "No learning summary available."))
+    st.caption(
+        "Historical research-only leaderboard. No broker APIs, no live trading, no auto execution, and no guaranteed alpha."
+    )
+    return board
+
+
 def render_strategy_comparison_engine(
     price_data,
     risk,
@@ -488,7 +790,1042 @@ def render_data_source_status(selected_asset, snapshot, price_data, screened_ass
 
     if status.get("fallback_count", 0) > 0:
         st.warning("Fallback/mock data is present. Treat affected rankings as lower-confidence research.")
+    if status.get("blocked_count", 0) > 0:
+        st.error("Some rows are blocked from advisor-style buy/sell recommendations.")
     st.write(status.get("summary", "No data-source summary available."))
+    return status
+
+
+def render_data_source_quality_dashboard(selected_asset, snapshot, price_data, screened_assets):
+    """Render stronger source registry and recommendation-gate context."""
+    st.header("Data Source Quality")
+    status = render_data_source_status(selected_asset, snapshot, price_data, screened_assets)
+
+    with st.expander("Source registry", expanded=False):
+        st.dataframe(list_data_sources(), width="stretch")
+
+    blocked = [
+        row for row in status.get("rows", [])
+        if row.get("recommendation_gate") == "Blocked"
+    ]
+    if blocked:
+        st.markdown("**Blocked recommendation rows**")
+        st.dataframe(blocked, width="stretch")
+    else:
+        st.success("No blocked recommendation gates in the current data set.")
+
+    st.caption(
+        "Market data uses free sources where available. Mock, stale, or missing-price data can display research but blocks buy/sell recommendations."
+    )
+    return status
+
+
+def render_financial_profile_form():
+    """Render and persist advisor-style financial profile inputs."""
+    profile = load_financial_profile()
+    st.header("Financial Profile")
+    st.caption("Stored locally in SQLite. Used for suitability checks before advisor-style outputs.")
+
+    with st.form("financial_profile_form"):
+        col1, col2, col3 = st.columns(3)
+        cash = col1.number_input("Cash available", min_value=0.0, value=float(profile.get("cash", 0.0)), step=100.0)
+        monthly_income = col2.number_input("Monthly income", min_value=0.0, value=float(profile.get("monthly_income", 0.0)), step=100.0)
+        monthly_expenses = col3.number_input("Monthly expenses", min_value=0.0, value=float(profile.get("monthly_expenses", 0.0)), step=100.0)
+
+        col4, col5, col6 = st.columns(3)
+        emergency_fund = col4.number_input("Emergency fund", min_value=0.0, value=float(profile.get("emergency_fund", 0.0)), step=100.0)
+        debt = col5.number_input("Total non-mortgage debt", min_value=0.0, value=float(profile.get("debt", 0.0)), step=100.0)
+        tax_account_type = col6.selectbox(
+            "Primary account type",
+            ["Taxable", "Traditional IRA", "Roth IRA", "401(k)", "Other"],
+            index=["Taxable", "Traditional IRA", "Roth IRA", "401(k)", "Other"].index(profile.get("tax_account_type", "Taxable"))
+            if profile.get("tax_account_type", "Taxable") in ["Taxable", "Traditional IRA", "Roth IRA", "401(k)", "Other"]
+            else 0,
+        )
+
+        col7, col8, col9 = st.columns(3)
+        investment_horizon = col7.selectbox(
+            "Investment horizon",
+            ["0-1 years", "1-3 years", "3-5 years", "5-10 years", "10+ years"],
+            index=["0-1 years", "1-3 years", "3-5 years", "5-10 years", "10+ years"].index(profile.get("investment_horizon", "3-5 years"))
+            if profile.get("investment_horizon", "3-5 years") in ["0-1 years", "1-3 years", "3-5 years", "5-10 years", "10+ years"]
+            else 2,
+        )
+        risk_tolerance = col8.selectbox(
+            "Risk tolerance",
+            ["Low", "Moderate", "High"],
+            index=["Low", "Moderate", "High"].index(profile.get("risk_tolerance", "Moderate"))
+            if profile.get("risk_tolerance", "Moderate") in ["Low", "Moderate", "High"]
+            else 1,
+        )
+        liquidity_needs = col9.selectbox(
+            "Liquidity needs",
+            ["Low", "Medium", "High"],
+            index=["Low", "Medium", "High"].index(profile.get("liquidity_needs", "Medium"))
+            if profile.get("liquidity_needs", "Medium") in ["Low", "Medium", "High"]
+            else 1,
+        )
+
+        col10, col11 = st.columns(2)
+        max_single = col10.number_input(
+            "Max single-stock exposure %",
+            min_value=1.0,
+            max_value=100.0,
+            value=float(profile.get("max_single_stock_exposure", 15.0)),
+            step=1.0,
+        )
+        max_sector = col11.number_input(
+            "Max sector exposure %",
+            min_value=1.0,
+            max_value=100.0,
+            value=float(profile.get("max_sector_exposure", 35.0)),
+            step=1.0,
+        )
+        goals = st.text_area("Goals", value=profile.get("goals", ""), height=80)
+        saved = st.form_submit_button("Save financial profile")
+
+    if saved:
+        profile = save_financial_profile(
+            cash=cash,
+            monthly_income=monthly_income,
+            monthly_expenses=monthly_expenses,
+            emergency_fund=emergency_fund,
+            debt=debt,
+            investment_horizon=investment_horizon,
+            risk_tolerance=risk_tolerance,
+            liquidity_needs=liquidity_needs,
+            goals=goals,
+            tax_account_type=tax_account_type,
+            max_single_stock_exposure=max_single,
+            max_sector_exposure=max_sector,
+        )
+        st.success("Financial profile saved.")
+
+    return profile
+
+
+def render_real_portfolio_editor():
+    """Render and persist current real holdings for strategy context."""
+    st.header("Real Portfolio")
+    st.caption("Manual holdings only. No broker connection, no live trading, no auto execution.")
+
+    holdings = load_real_holdings()
+    if holdings:
+        st.dataframe(holdings, width="stretch")
+    else:
+        st.info("No real holdings saved yet.")
+
+    with st.form("real_holding_form"):
+        col1, col2, col3 = st.columns(3)
+        symbol = col1.text_input("Symbol", value="").upper()
+        shares = col2.number_input("Shares", min_value=0.0, value=0.0, step=1.0)
+        cost_basis = col3.number_input("Cost basis per share", min_value=0.0, value=0.0, step=1.0)
+        col4, col5 = st.columns(2)
+        account_type = col4.selectbox("Account type", ["Taxable", "Traditional IRA", "Roth IRA", "401(k)", "Other"])
+        current_value = col5.number_input("Current value", min_value=0.0, value=0.0, step=100.0)
+        target_notes = st.text_input("Target notes", value="")
+        save_clicked = st.form_submit_button("Save holding")
+
+    if save_clicked:
+        if symbol.strip():
+            save_real_holding(
+                symbol=symbol,
+                shares=shares,
+                cost_basis=cost_basis,
+                account_type=account_type,
+                current_value=current_value,
+                target_notes=target_notes,
+            )
+            st.success(f"Saved holding for {symbol}.")
+            holdings = load_real_holdings()
+        else:
+            st.warning("Symbol is required.")
+
+    delete_symbol = st.text_input("Delete holding symbol", value="", key="delete_real_holding_symbol").upper()
+    if st.button("Delete holding"):
+        if delete_real_holding(delete_symbol):
+            st.success(f"Deleted {delete_symbol}.")
+            holdings = load_real_holdings()
+        else:
+            st.warning("No matching holding found.")
+
+    return holdings
+
+
+def render_sp500_strategy_scan(period, default_rows=None):
+    """Render a local S&P 500-style scan control and return scan rows."""
+    st.header("S&P 500-Style Scan")
+    universe = get_sp500_style_universe()
+    col1, col2 = st.columns(2)
+    scan_limit = col1.slider("Symbols to scan", min_value=10, max_value=len(universe), value=min(25, len(universe)), step=5)
+    col2.metric("Local universe size", len(universe))
+
+    with st.expander("Universe preview", expanded=False):
+        st.dataframe(universe[:scan_limit], width="stretch")
+
+    if "sp500_strategy_scan_rows" not in st.session_state:
+        st.session_state.sp500_strategy_scan_rows = default_rows or []
+
+    if st.button("Run S&P 500-style scan"):
+        symbols = get_sp500_style_symbols(limit=scan_limit)
+        st.session_state.sp500_strategy_scan_rows = run_cross_asset_screen(symbols, period=period)
+
+    rows = st.session_state.sp500_strategy_scan_rows or default_rows or []
+    if rows:
+        st.dataframe(rows[:25], width="stretch")
+    else:
+        st.info("Run the scan to rank the local S&P 500-style universe. Current watchlist results are used until then.")
+    return rows
+
+
+def _metadata_by_symbol(rows):
+    return {str(row.get("symbol", "")).upper(): row for row in rows}
+
+
+def _enrich_scan_rows_with_growth(scan_rows, universe_rows):
+    metadata = _metadata_by_symbol(universe_rows)
+    enriched = []
+    for row in scan_rows or []:
+        symbol = str(row.get("symbol", "")).upper()
+        meta = metadata.get(symbol, {})
+        combined = {**meta, **row, "symbol": symbol}
+        growth = score_growth_discovery(
+            symbol,
+            combined,
+            fundamentals={},
+            catalysts={},
+            alt_data={},
+            source_quality={
+                "data_confidence": combined.get("data_confidence", "Unknown"),
+                "recommendation_gate": combined.get("recommendation_gate", "Warning"),
+            },
+        )
+        combined.update(
+            {
+                "growth_score": growth.get("growth_score", 0),
+                "growth_label": growth.get("research_label", "Speculative Research"),
+                "growth_summary": growth.get("summary", ""),
+                "growth_positive_factors": " | ".join(growth.get("positive_factors", [])[:3]),
+                "growth_risk_flags": " | ".join(growth.get("risk_flags", [])[:3]),
+            }
+        )
+        enriched.append(combined)
+    enriched.sort(key=lambda item: item.get("growth_score", item.get("score", 0)), reverse=True)
+    return enriched
+
+
+def _display_best_opportunity_rows(rows):
+    table = []
+    for row in rows or []:
+        table.append(
+            {
+                "symbol": row.get("symbol"),
+                "company": row.get("company", ""),
+                "best_lane": row.get("best_lane"),
+                "entry_state": row.get("entry_state"),
+                "lane_score": row.get("lane_score"),
+                "short_term": row.get("short_term_score"),
+                "long_term": row.get("long_term_score"),
+                "futures_proxy": row.get("futures_proxy_score"),
+                "holding_period": row.get("best_holding_period"),
+                "gate": row.get("recommendation_gate"),
+                "confidence": row.get("data_confidence"),
+                "reason": row.get("lane_reason", ""),
+            }
+        )
+    return table
+
+
+def render_best_opportunities_workstation(
+    scan_rows,
+    financial_profile=None,
+    accuracy_context=None,
+    market_timing=None,
+    selected_asset="",
+    period="1mo",
+    key_suffix="best_opportunities",
+):
+    """Render best opportunities by lane and any-ticker research."""
+    st.header("Best Opportunities Workstation")
+    st.caption(
+        "Ranks long-term, short-term, and futures-proxy ideas with data gates. "
+        "Futures remain ETF/proxy-only; no direct contracts, margin, leverage, or execution."
+    )
+    result = rank_best_opportunities(
+        scan_rows,
+        profile=financial_profile or {},
+        accuracy_context=accuracy_context or {},
+        market_timing=market_timing or {},
+        limit=40,
+    )
+    st.write(result.get("summary", "No best-opportunities summary available."))
+
+    lane_tabs = st.tabs(["All", "Long Term", "Short Term", "Futures Proxy", "Needs Data"])
+    with lane_tabs[0]:
+        st.dataframe(_display_best_opportunity_rows(result.get("ranked", [])[:30]), width="stretch")
+    for tab, lane in zip(lane_tabs[1:], ["Long Term", "Short Term", "Futures Proxy", "Needs Data"]):
+        with tab:
+            rows = result.get("by_lane", {}).get(lane, [])
+            if rows:
+                st.dataframe(_display_best_opportunity_rows(rows[:20]), width="stretch")
+            else:
+                st.write(f"No {lane} rows ranked yet.")
+
+    st.subheader("Any Ticker Research")
+    c1, c2 = st.columns([2, 1])
+    ticker = c1.text_input(
+        "Research any ticker",
+        value=selected_asset or "",
+        key=f"any_ticker_{key_suffix}",
+    ).upper().strip()
+    if c2.button("Run Any Ticker Research", key=f"run_any_ticker_{key_suffix}"):
+        st.session_state[f"{key_suffix}_any_ticker_packet"] = run_any_ticker_research(
+            ticker,
+            profile=financial_profile or {},
+            accuracy_context=accuracy_context or {},
+            market_timing=market_timing or {},
+            period=period,
+        )
+
+    packet = st.session_state.get(f"{key_suffix}_any_ticker_packet")
+    if packet:
+        p1, p2, p3, p4 = st.columns(4)
+        p1.metric("Verdict", packet.get("final_verdict", "Needs Data"))
+        p2.metric("Best lane", packet.get("best_lane", "Needs Data"))
+        p3.metric("Entry state", packet.get("entry_state", "Needs Data"))
+        p4.metric("Data", packet.get("data_quality", {}).get("data_confidence", "Unknown"))
+        st.write(packet.get("summary", "No packet summary available."))
+        st.markdown("**Lane scores**")
+        st.dataframe(
+            [{"lane": lane, "score": score} for lane, score in packet.get("lane_scores", {}).items()],
+            width="stretch",
+        )
+        col_e, col_r = st.columns(2)
+        with col_e:
+            st.markdown("**Evidence**")
+            for item in packet.get("evidence", [])[:8]:
+                st.success(f"- {item}")
+        with col_r:
+            st.markdown("**Risks / limits**")
+            for item in packet.get("risks", [])[:8] or ["No major risk flags returned."]:
+                st.warning(f"- {item}")
+        st.markdown("**What would change this**")
+        for item in packet.get("what_would_change_this", [])[:6]:
+            st.info(f"- {item}")
+        st.write(f"Watchlist view: {packet.get('watchlist_view', 'N/A')}")
+
+        if st.button("Save Any Ticker Verdict To Learning Log", key=f"save_any_ticker_{key_suffix}"):
+            saved = save_recommendation_log(
+                symbol=packet.get("symbol"),
+                action=packet.get("final_verdict"),
+                horizon=packet.get("best_lane"),
+                score=packet.get("score"),
+                price=(packet.get("snapshot") or {}).get("price"),
+                engine_inputs={
+                    "source": "Best Opportunities Any Ticker",
+                    "lane": packet.get("best_lane"),
+                    "entry_state": packet.get("entry_state"),
+                    "lane_scores": packet.get("lane_scores", {}),
+                    "data_confidence": packet.get("data_quality", {}).get("data_confidence", "Unknown"),
+                    "news_sentiment": (packet.get("news_context") or {}).get("market_sentiment", "Unknown"),
+                    "fundamental_quality": (packet.get("fundamentals") or {}).get("fundamental_quality", "Unknown"),
+                    "market_regime": packet.get("regime", "Unknown"),
+                    "thesis_notes": packet.get("summary", ""),
+                },
+                data_gate=packet.get("data_quality", {}).get("recommendation_gate", ""),
+                suitability_status="Human review required",
+                sector=packet.get("sector", map_asset_to_sector(packet.get("symbol"))),
+                market_regime=packet.get("regime", ""),
+                benchmark_symbol="SPY",
+            )
+            st.success("Any-ticker verdict logged for future outcome evaluation.")
+            st.write(saved)
+
+    return result
+
+
+def render_opportunity_terminal(period, default_rows=None, financial_profile=None, sector_context=None, macro_context=None, key_suffix="main"):
+    """Render the broader opportunity terminal and return scan/timing context."""
+    st.header("Opportunity Terminal")
+    st.caption(
+        "US stocks, global ADRs, ETFs, IPO/recent listings, and up-and-coming themes. "
+        "Research-only: no guaranteed growth, no broker execution."
+    )
+
+    universe = build_opportunity_universe(scope="US_ADR", include_etfs=True, include_ipos=True)
+    col1, col2, col3 = st.columns(3)
+    max_rows = max(10, len(universe))
+    scan_limit = col1.slider(
+        "Opportunity symbols to scan",
+        min_value=10,
+        max_value=max_rows,
+        value=min(40, max_rows),
+        step=5,
+        key=f"opportunity_terminal_scan_limit_{key_suffix}",
+    )
+    col2.metric("Universe size", len(universe))
+    col3.metric("Scope", "US + ADRs")
+
+    with st.expander("Universe preview", expanded=False):
+        st.dataframe(universe[:scan_limit], width="stretch")
+
+    if "opportunity_terminal_rows" not in st.session_state:
+        fallback = _enrich_scan_rows_with_growth(default_rows or [], universe)
+        st.session_state.opportunity_terminal_rows = fallback
+
+    if st.button("Run Opportunity Terminal scan", key=f"run_opportunity_terminal_scan_{key_suffix}"):
+        symbols = get_opportunity_symbols(limit=scan_limit, scope="US_ADR", include_etfs=True, include_ipos=True)
+        scanned = run_cross_asset_screen(symbols, period=period)
+        st.session_state.opportunity_terminal_rows = _enrich_scan_rows_with_growth(scanned, universe)
+
+    rows = st.session_state.opportunity_terminal_rows or _enrich_scan_rows_with_growth(default_rows or [], universe)
+    index_rows = []
+    for index_symbol in ["SPY", "QQQ", "IWM"]:
+        try:
+            snapshot = get_market_snapshot(index_symbol)
+            quality = evaluate_data_quality(snapshot)
+            existing = next((row for row in rows if row.get("symbol") == index_symbol), {})
+            index_rows.append(
+                {
+                    "symbol": index_symbol,
+                    "return_pct": existing.get("return_pct", snapshot.get("change_pct", 0.0)),
+                    "volatility_pct": existing.get("volatility_pct", 0.0),
+                    "max_drawdown_pct": existing.get("max_drawdown_pct", 0.0),
+                    "recommendation_gate": quality.get("recommendation_gate", "Warning"),
+                }
+            )
+        except Exception:
+            pass
+
+    timing = build_market_timing_context(
+        {"rows": index_rows},
+        rows,
+        sector_context or {},
+        macro_context or {},
+        financial_profile or {},
+    )
+
+    st.subheader("Market Timing & Crash Risk")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Market risk", timing.get("market_risk_level", "Unknown"))
+    c2.metric("Regime", timing.get("timing_regime", "Unknown"))
+    c3.metric("Breadth", f"{timing.get('breadth_pct', 0.0):.1f}%")
+    c4.metric("Worst index drawdown", f"{timing.get('worst_index_drawdown_pct', 0.0):.1f}%")
+    st.write(timing.get("cash_deployment_plan", "No cash deployment view available."))
+    for item in timing.get("crash_warning_flags", [])[:4]:
+        st.warning(f"- {item}")
+
+    st.subheader("Top Opportunities")
+    if rows:
+        top_table = []
+        for row in rows[:25]:
+            top_table.append(
+                {
+                    "symbol": row.get("symbol"),
+                    "company": row.get("company", ""),
+                    "theme": row.get("theme", ""),
+                    "region": row.get("region", ""),
+                    "listing": row.get("listing_type", ""),
+                    "growth_label": row.get("growth_label"),
+                    "growth_score": row.get("growth_score"),
+                    "signal_score": row.get("score"),
+                    "return_%": row.get("return_pct"),
+                    "volatility_%": row.get("volatility_pct"),
+                    "gate": row.get("recommendation_gate"),
+                    "confidence": row.get("data_confidence"),
+                }
+            )
+        st.dataframe(top_table, width="stretch")
+    else:
+        st.info("Run the scan to rank the broader opportunity universe.")
+
+    st.subheader("Up-And-Coming Stocks")
+    emerging = [row for row in rows if row.get("growth_label") in {"Strategic Buy Candidate", "Emerging Watchlist", "Wait for Pullback"}]
+    st.dataframe(emerging[:15], width="stretch") if emerging else st.write("No up-and-coming candidates ranked yet.")
+
+    st.subheader("Global ADR Watchlist")
+    adrs = [row for row in rows if "ADR" in str(row.get("listing_type", "")) or row.get("region") not in {"", "United States"}]
+    st.dataframe(adrs[:15], width="stretch") if adrs else st.write("No ADR rows ranked yet.")
+
+    st.subheader("Strategic Buy Zones")
+    for item in timing.get("strategic_buy_zones", []):
+        st.info(f"- {item}")
+
+    st.subheader("Data Trust Panel")
+    blocked = [row for row in rows if row.get("recommendation_gate") == "Blocked"]
+    warning = [row for row in rows if row.get("recommendation_gate") == "Warning"]
+    d1, d2, d3 = st.columns(3)
+    d1.metric("Trusted/usable rows", len(rows) - len(blocked) - len(warning))
+    d2.metric("Warning rows", len(warning))
+    d3.metric("Blocked rows", len(blocked))
+    if blocked:
+        st.warning("Blocked symbols can show research but cannot receive buy/sell or auto paper-trade eligibility.")
+        st.dataframe(
+            [{"symbol": row.get("symbol"), "source": row.get("data_source"), "issues": row.get("data_issues", "")} for row in blocked[:15]],
+            width="stretch",
+        )
+
+    st.caption(
+        "Opportunity rankings are research evidence only. Final Verdict remains the source of truth for actions."
+    )
+    return {"rows": rows, "market_timing": timing, "universe": universe}
+
+
+def _display_buy_rows(rows):
+    table = []
+    for row in rows or []:
+        table.append(
+            {
+                "rank": row.get("buy_finder_rank"),
+                "symbol": row.get("symbol"),
+                "company": row.get("company", ""),
+                "action": row.get("action"),
+                "score": row.get("score"),
+                "growth_score": row.get("growth_score"),
+                "return_%": row.get("return_pct"),
+                "volatility_%": row.get("volatility_pct"),
+                "gate": row.get("recommendation_gate"),
+                "paper_eligible": row.get("paper_trade_eligible"),
+                "why": " | ".join(row.get("reasons", [])[:2]),
+            }
+        )
+    return table
+
+
+def render_buy_finder_terminal(scan_rows, market_timing, financial_profile, real_holdings, accuracy_context=None, key_suffix="main"):
+    """Render buy candidates, data-research candidates, and agent task workflow."""
+    st.header("Buy Finder")
+    st.caption("Finds buy/add ideas while separating weak data from true Avoid evidence. Research-only; no real orders.")
+    buy_finder = build_buy_finder(
+        scan_rows,
+        final_verdicts={},
+        market_timing=market_timing,
+        profile=financial_profile,
+        holdings=real_holdings,
+        accuracy_context=accuracy_context or {},
+    )
+    all_rows = buy_finder.get("all_rows", [])
+    action_plan = build_portfolio_action_plan(all_rows, real_holdings, financial_profile, market_timing)
+    agent_context = generate_agent_research_tasks(all_rows, scan_rows, action_plan)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Buy candidates", len(buy_finder.get("best_buy_candidates", [])))
+    c2.metric("Add candidates", len(buy_finder.get("add_candidates", [])))
+    c3.metric("Needs data/research", len(buy_finder.get("needs_data", [])))
+    c4.metric("Avoid with evidence", len(buy_finder.get("avoid_with_evidence", [])))
+    st.write(buy_finder.get("summary", "No Buy Finder summary available."))
+
+    sections = [
+        ("Best Buy Candidates", buy_finder.get("best_buy_candidates", [])),
+        ("Add Candidates", buy_finder.get("add_candidates", [])),
+        ("Wait for Pullback", buy_finder.get("wait_for_pullback", [])),
+        ("Needs Data / Agent Research", buy_finder.get("needs_data", [])),
+        ("Avoid With Evidence", buy_finder.get("avoid_with_evidence", [])),
+    ]
+    for title, rows in sections:
+        st.subheader(title)
+        table = _display_buy_rows(rows[:15])
+        if table:
+            st.dataframe(table, width="stretch")
+        else:
+            st.write("None.")
+
+    st.subheader("Portfolio Optimizer Action Plan")
+    actions = action_plan.get("actions", [])
+    if actions:
+        st.dataframe(actions[:25], width="stretch")
+    else:
+        st.write("No portfolio action rows yet.")
+
+    st.subheader("Agent Task Queue")
+    task_rows = agent_context.get("tasks", [])
+    if task_rows:
+        st.dataframe(task_rows[:25], width="stretch")
+        if st.button("Save generated agent tasks", key=f"save_agent_tasks_{key_suffix}"):
+            saved = 0
+            for task in task_rows:
+                save_agent_research_task(**task)
+                saved += 1
+            st.success(f"Saved {saved} agent task(s).")
+    else:
+        st.write("No agent tasks generated yet.")
+
+    saved_tasks = load_agent_research_tasks()
+    if saved_tasks:
+        with st.expander("Saved agent research queue", expanded=False):
+            st.dataframe(saved_tasks[:50], width="stretch")
+            options = [f"{row.get('id')} | {row.get('symbol')} | {row.get('task_type')} | {row.get('status')}" for row in saved_tasks]
+            choice = st.selectbox("Update task", options, key=f"agent_task_choice_{key_suffix}")
+            task_id = int(choice.split(" | ")[0])
+            status = st.selectbox("Task status", ["Open", "In Progress", "Done", "Blocked"], key=f"agent_task_status_{key_suffix}")
+            findings = st.text_input("Findings update", value="", key=f"agent_task_findings_{key_suffix}")
+            if st.button("Update agent task", key=f"update_agent_task_{key_suffix}"):
+                update_agent_research_task(task_id, status, findings=findings)
+                st.success("Agent task updated.")
+
+    st.subheader("Personal Portfolio Assistant")
+    best = buy_finder.get("best_buy_candidates", [])[:3]
+    adds = buy_finder.get("add_candidates", [])[:3]
+    needs = buy_finder.get("needs_data", [])[:3]
+    if best:
+        st.success("Best buy candidates to review: " + ", ".join(row.get("symbol", "") for row in best))
+    elif adds:
+        st.info("No top buy candidates yet. Add candidates to review: " + ", ".join(row.get("symbol", "") for row in adds))
+    elif needs:
+        st.info("Most useful next work is data/research: " + ", ".join(row.get("symbol", "") for row in needs))
+    else:
+        st.write("No urgent assistant action from current scan.")
+    st.write(action_plan.get("summary", "No portfolio action summary available."))
+    st.caption("AIOS-ready task format. Agents assist research and paper testing only; they do not place real trades.")
+    return {
+        "buy_finder": buy_finder,
+        "portfolio_action_plan": action_plan,
+        "agent_tasks": agent_context,
+    }
+
+
+def render_portfolio_strategy_advisor(
+    financial_profile,
+    real_holdings,
+    scan_results,
+    benchmark_truth=None,
+    decision_intelligence=None,
+    accuracy_context=None,
+):
+    """Render advisor-style non-executing portfolio strategy."""
+    strategy = build_portfolio_strategy(
+        financial_profile,
+        real_holdings,
+        scan_results,
+        benchmark_truth=benchmark_truth,
+        decision_intelligence=decision_intelligence,
+        accuracy_context=accuracy_context,
+    )
+
+    st.header("Portfolio Strategy Evidence")
+    suitability = strategy.get("suitability", {})
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Suitability status", suitability.get("status", "Unknown"))
+    col2.metric("Monthly surplus", f"${suitability.get('monthly_surplus', 0.0):,.2f}")
+    col3.metric("Emergency fund", f"{suitability.get('emergency_months', 0.0):.1f} months")
+
+    st.markdown("**Cash strategy**")
+    cash = strategy.get("cash_strategy", {})
+    st.write(f"{cash.get('action', 'N/A')}: {cash.get('reason', 'No cash strategy available.')}")
+
+    for title, key in [
+        ("Buy / Add Engine Views", "buy_candidates"),
+        ("Trim Engine Views", "trim_candidates"),
+        ("Sell Engine Views", "sell_candidates"),
+        ("Hold Engine Views", "hold_candidates"),
+    ]:
+        rows = strategy.get(key, [])
+        st.markdown(f"**{title}**")
+        if rows:
+            table = []
+            for row in rows[:10]:
+                table.append(
+                    {
+                        "symbol": row.get("symbol"),
+                        "engine_view": row.get("action"),
+                        "score": row.get("score"),
+                        "confidence": row.get("confidence_level"),
+                        "horizon": row.get("time_horizon"),
+                        "target": row.get("target_allocation_band"),
+                        "risk_budget": row.get("risk_budget"),
+                        "data_confidence": row.get("data_confidence"),
+                        "gate": row.get("recommendation_gate"),
+                        "reason": " | ".join(row.get("reasons", [])[:2]),
+                        "risk": " | ".join(row.get("risks", [])[:2]),
+                    }
+                )
+            st.dataframe(table, width="stretch")
+        else:
+            st.write("None.")
+
+    st.markdown("**Risk actions**")
+    if strategy.get("risk_actions"):
+        for item in strategy.get("risk_actions", []):
+            st.warning(f"- {item}")
+    else:
+        st.success("No major suitability risk actions triggered.")
+
+    st.markdown("**Accuracy context**")
+    accuracy = strategy.get("accuracy_context", {})
+    st.write(accuracy.get("summary", "No accuracy context available."))
+
+    st.write(strategy.get("portfolio_summary", "No strategy summary available."))
+    st.caption("Evidence only. The Final Verdict panel is the source-of-truth action.")
+    return strategy
+
+
+def _find_strategy_row(strategy, symbol):
+    symbol = str(symbol or "").upper()
+    for key in ["buy_candidates", "trim_candidates", "sell_candidates", "hold_candidates"]:
+        for row in (strategy or {}).get(key, []):
+            if str(row.get("symbol", "")).upper() == symbol:
+                return row
+    return {}
+
+
+def render_final_recommendation_panel(
+    symbol,
+    signal_data,
+    decision_intelligence,
+    advisor_strategy,
+    data_quality,
+    suitability,
+    accuracy_context,
+    risk,
+    current_holding=None,
+    ipo_context=None,
+    growth_discovery_context=None,
+    market_timing_context=None,
+):
+    """Render one source-of-truth final verdict and conflict explanation."""
+    selected_decision = {}
+    for row in (decision_intelligence or {}).get("best_opportunities", []):
+        if str(row.get("symbol", "")).upper() == str(symbol).upper():
+            selected_decision = row
+            break
+
+    strategy_row = _find_strategy_row(advisor_strategy, symbol)
+    current_holding = current_holding or {}
+    portfolio_context = {
+        **(strategy_row or {}),
+        "score": strategy_row.get("score", signal_data.get("score", 50)) if strategy_row else signal_data.get("score", 50),
+        "volatility_pct": risk.get("volatility_pct", 0.0),
+        "max_drawdown_pct": risk.get("max_drawdown_pct", 0.0),
+        "has_position": bool(current_holding),
+        "current_exposure_pct": strategy_row.get("current_exposure_pct", 0.0) if strategy_row else 0.0,
+        "max_single_stock_exposure": 15.0,
+        "recommendation_gate": data_quality.get("recommendation_gate", "Warning"),
+        "data_confidence": data_quality.get("data_confidence", "Unknown"),
+    }
+    engine_votes = [
+        {
+            "engine": "Signal Engine",
+            "action": signal_data.get("signal", "Watch"),
+            "score": signal_data.get("score", 0),
+            "reason": "Raw signal engine view.",
+        },
+        {
+            "engine": "Quant Decision Intelligence",
+            "action": selected_decision.get("research_action", "Watch"),
+            "score": selected_decision.get("decision_score", 0),
+            "reason": selected_decision.get("timing_view", ""),
+        },
+        {
+            "engine": "Portfolio Strategy Advisor",
+            "action": strategy_row.get("action", "Watch"),
+            "score": strategy_row.get("score", 0),
+            "reason": "Portfolio/suitability action view.",
+        },
+        {
+            "engine": "Data Quality Gate",
+            "action": "Needs Data" if data_quality.get("recommendation_gate") == "Blocked" else "Watch",
+            "score": data_quality.get("data_confidence", ""),
+            "reason": data_quality.get("summary", data_quality.get("status", "")),
+        },
+    ]
+    if growth_discovery_context:
+        engine_votes.append(
+            {
+                "engine": "Growth Discovery",
+                "action": growth_discovery_context.get("research_label", "Watch"),
+                "score": growth_discovery_context.get("growth_score", 0),
+                "reason": growth_discovery_context.get("summary", ""),
+            }
+        )
+    if market_timing_context:
+        engine_votes.append(
+            {
+                "engine": "Market Timing",
+                "action": "Wait for Pullback"
+                if market_timing_context.get("market_risk_level") in {"High", "Elevated"}
+                else "Watch",
+                "score": market_timing_context.get("market_risk_level", ""),
+                "reason": market_timing_context.get("summary", ""),
+            }
+        )
+    final = build_final_recommendation(
+        symbol,
+        engine_votes,
+        portfolio_context,
+        data_quality,
+        suitability,
+        accuracy_context,
+        ipo_context=ipo_context,
+        growth_discovery_context=growth_discovery_context,
+        market_timing_context=market_timing_context,
+    )
+
+    st.header("Final Verdict")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Verdict", final.get("final_verdict", "Watch"))
+    col2.metric("Confidence", final.get("confidence", "Low"))
+    col3.metric("Time horizon", final.get("time_horizon", "Swing"))
+    col4.metric("Paper eligible", "Yes" if final.get("paper_trade_eligible") else "No")
+
+    st.write(f"Position guidance: {final.get('position_guidance', 'N/A')}")
+    st.write(f"Risk budget: {final.get('risk_budget', 'N/A')}")
+    if final.get("market_regime") or final.get("market_risk_level"):
+        st.write(
+            f"Market timing: {final.get('market_regime', 'Unknown')} / "
+            f"{final.get('market_risk_level', 'Unknown')} risk."
+        )
+    if final.get("strategic_buy_zone"):
+        st.write(f"Strategic buy-zone condition: {final.get('strategic_buy_zone')}")
+    if final.get("growth_discovery_label"):
+        st.write(
+            f"Growth discovery: {final.get('growth_discovery_label')} "
+            f"({final.get('growth_discovery_score', 0):.0f}/100)."
+        )
+    st.write(final.get("summary", "No final verdict summary available."))
+
+    if final.get("vetoes"):
+        st.markdown("**Vetoes / downgrades**")
+        for item in final.get("vetoes", []):
+            st.warning(f"- {item}")
+
+    st.markdown("**Why this final verdict won**")
+    for item in final.get("why", []):
+        st.success(f"- {item}")
+
+    st.markdown("**Conflict explanation**")
+    st.write(final.get("conflict_summary", "No conflicts available."))
+    st.dataframe(final.get("conflict_rows", []), width="stretch")
+
+    st.markdown("**What would change this decision**")
+    for item in final.get("what_would_change_this", []):
+        st.info(f"- {item}")
+
+    st.caption("This final verdict is the source-of-truth action. Other sections are evidence only; no broker execution.")
+    return final
+
+
+def render_ipo_research(symbol=None):
+    """Render IPO and recent-listing research context."""
+    context = generate_ipo_research_context(symbol)
+    st.header("IPO Research")
+    st.caption("IPO rows are research-only until listed and enough market data exists.")
+    rows = context.get("ipo_candidates", [])
+    if rows:
+        st.dataframe(rows, width="stretch")
+    else:
+        st.info(context.get("summary", "No IPO candidates available."))
+    selected = context.get("selected_ipo", {})
+    if selected:
+        st.write(selected.get("summary", "No selected IPO summary."))
+        for item in selected.get("risk_flags", []):
+            st.warning(f"- {item}")
+    return context
+
+
+def render_broker_alert_tickets(final_recommendation):
+    """Render non-executing broker alert ticket workflow."""
+    st.header("Broker Alert Tickets")
+    st.caption("Alerts are manual review tickets only. No broker API, no live order, no execution.")
+    final_recommendation = final_recommendation or {}
+
+    if final_recommendation.get("alert_eligible"):
+        if st.button("Save broker alert ticket"):
+            saved = save_broker_alert(
+                symbol=final_recommendation.get("symbol"),
+                action=final_recommendation.get("final_verdict"),
+                confidence=final_recommendation.get("confidence"),
+                ticket_details={
+                    "time_horizon": final_recommendation.get("time_horizon"),
+                    "position_guidance": final_recommendation.get("position_guidance"),
+                    "risk_budget": final_recommendation.get("risk_budget"),
+                    "conflict_summary": final_recommendation.get("conflict_summary"),
+                    "manual_checklist": final_recommendation.get("what_would_change_this", []),
+                },
+            )
+            st.success("Broker alert ticket saved for manual review.")
+            st.write(saved)
+    else:
+        st.info("Final verdict is not eligible for an alert ticket.")
+
+    alerts = load_broker_alerts()
+    if alerts:
+        st.dataframe(alerts[:10], width="stretch")
+    else:
+        st.write("No broker alert tickets saved yet.")
+
+    with st.expander("Resolve alert", expanded=False):
+        if alerts:
+            options = [f"{row.get('id')} | {row.get('symbol')} | {row.get('action')} | {row.get('status')}" for row in alerts]
+            choice = st.selectbox("Alert", options)
+            alert_id = int(choice.split(" | ")[0])
+            status = st.selectbox("Status", ["Pending", "Resolved", "Dismissed"])
+            notes = st.text_input("Outcome notes", value="")
+            if st.button("Update alert status"):
+                update_broker_alert_status(alert_id, status, outcome_notes=notes)
+                st.success("Alert updated.")
+        else:
+            st.write("No alerts to resolve.")
+    return alerts
+
+
+def render_recommendation_logger(strategy, current_prices=None):
+    """Allow saving strategy recommendations into the learning log."""
+    st.header("Recommendation Logger")
+    st.caption("Logs recommendations for later outcome learning. No broker APIs or execution.")
+    current_prices = current_prices or {}
+    strategy = strategy or {}
+
+    rows = []
+    for key in ["buy_candidates", "trim_candidates", "sell_candidates", "hold_candidates"]:
+        rows.extend(strategy.get(key, []))
+
+    actionable = [row for row in rows if row.get("action") in {"Buy Candidate", "Add", "Trim", "Sell Candidate", "Hold"}]
+    if not actionable:
+        st.info("No recommendation rows available to log yet.")
+        return None
+
+    labels = [
+        f"{row.get('symbol')} | {row.get('action')} | {row.get('time_horizon', 'Swing')} | score {row.get('score', 0)}"
+        for row in actionable
+    ]
+    selected = st.selectbox("Recommendation to log", labels)
+    selected_row = actionable[labels.index(selected)]
+
+    if st.button("Save recommendation to learning log"):
+        saved = save_recommendation_log(
+            symbol=selected_row.get("symbol"),
+            action=selected_row.get("action"),
+            horizon=selected_row.get("time_horizon", "Swing"),
+            score=selected_row.get("score", 0),
+            price=current_prices.get(selected_row.get("symbol")),
+            engine_inputs={
+                "reasons": selected_row.get("reasons", []),
+                "risks": selected_row.get("risks", []),
+                "lane": selected_row.get("best_lane", selected_row.get("time_horizon", "Swing")),
+                "entry_state": selected_row.get("entry_state", selected_row.get("action")),
+                "lane_scores": {
+                    "short_term_score": selected_row.get("short_term_score"),
+                    "long_term_score": selected_row.get("long_term_score"),
+                    "futures_proxy_score": selected_row.get("futures_proxy_score"),
+                },
+                "data_confidence": selected_row.get("data_confidence", "Unknown"),
+                "news_sentiment": selected_row.get("news_sentiment", "Unknown"),
+                "fundamental_quality": selected_row.get("fundamental_quality", "Unknown"),
+                "market_regime": selected_row.get("regime", ""),
+                "thesis_notes": " | ".join(selected_row.get("reasons", [])[:3]),
+                "target_allocation_band": selected_row.get("target_allocation_band", ""),
+                "risk_budget": selected_row.get("risk_budget", ""),
+                "invalidation_triggers": selected_row.get("invalidation_triggers", []),
+            },
+            data_gate=selected_row.get("recommendation_gate", ""),
+            suitability_status=(strategy.get("suitability") or {}).get("status", ""),
+            sector=map_asset_to_sector(selected_row.get("symbol", "")),
+            market_regime=selected_row.get("regime", ""),
+        )
+        st.success("Recommendation logged.")
+        st.write(saved)
+
+    return selected_row
+
+
+def render_recommendation_learning_dashboard(current_prices=None):
+    """Render recommendation accuracy, outcome updates, and experiment guidance."""
+    logs = load_recommendation_log()
+    accuracy = evaluate_recommendation_accuracy(logs, current_prices=current_prices or {})
+    learning = build_learning_dashboard_context(accuracy)
+
+    st.header("Recommendation Learning Dashboard")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Logged", accuracy.get("total_recommendations", 0))
+    col2.metric("Evaluated", accuracy.get("evaluated_count", 0))
+    col3.metric("Hit rate", f"{accuracy.get('hit_rate', 0.0):.2f}%")
+    col4.metric("Avg return", f"{accuracy.get('average_return_pct', 0.0):+.2f}%")
+
+    col5, col6, col7 = st.columns(3)
+    col5.metric("Avg alpha", f"{accuracy.get('average_alpha_pct', 0.0):+.2f}%")
+    col6.metric("False positives", accuracy.get("false_positive_count", 0))
+    col7.metric("Confidence adj.", f"{accuracy.get('confidence_adjustment', 0.0):+.1f}")
+
+    st.markdown("**What is working**")
+    for item in learning.get("working", []):
+        st.success(f"- {item}")
+
+    st.markdown("**What is not working**")
+    for item in learning.get("not_working", []):
+        st.warning(f"- {item}")
+
+    st.markdown("**Next best experiments**")
+    for item in learning.get("next_experiments", []):
+        st.info(f"- {item}")
+
+    if accuracy.get("horizon_stats"):
+        st.markdown("**Timeframe stats**")
+        st.dataframe(accuracy.get("horizon_stats", []), width="stretch")
+    if accuracy.get("lane_stats"):
+        st.markdown("**Lane stats**")
+        st.dataframe(accuracy.get("lane_stats", []), width="stretch")
+    if accuracy.get("sector_stats"):
+        st.markdown("**Sector stats**")
+        st.dataframe(accuracy.get("sector_stats", []), width="stretch")
+    if accuracy.get("data_confidence_stats"):
+        st.markdown("**Data confidence stats**")
+        st.dataframe(accuracy.get("data_confidence_stats", []), width="stretch")
+    if accuracy.get("factor_stats"):
+        with st.expander("Factor stats", expanded=False):
+            st.markdown("**News sentiment**")
+            st.dataframe(accuracy.get("factor_stats", {}).get("news_sentiment", []), width="stretch")
+            st.markdown("**Fundamental quality**")
+            st.dataframe(accuracy.get("factor_stats", {}).get("fundamental_quality", []), width="stretch")
+
+    audit = build_research_process_audit(accuracy)
+    st.subheader("Research Process Audit")
+    a1, a2 = st.columns(2)
+    with a1:
+        st.markdown("**Overconfidence warnings**")
+        for item in audit.get("overconfidence_warnings", []):
+            st.warning(f"- {item}")
+        st.markdown("**Repeated mistake patterns**")
+        for item in audit.get("repeated_mistake_patterns", []):
+            st.warning(f"- {item}")
+    with a2:
+        st.markdown("**Missed risk flags**")
+        for item in audit.get("missed_risk_flags", []):
+            st.info(f"- {item}")
+        st.markdown("**Benchmark notes**")
+        for item in audit.get("benchmark_notes", []):
+            st.info(f"- {item}")
+
+    with st.expander("Update recommendation outcome", expanded=False):
+        if logs:
+            options = [
+                f"{row.get('id')} | {row.get('symbol')} | {row.get('action')} | {row.get('horizon')}"
+                for row in logs
+            ]
+            choice = st.selectbox("Logged recommendation", options)
+            selected_id = int(choice.split(" | ")[0])
+            outcome_price = st.number_input("Outcome price", min_value=0.0, value=0.0, step=1.0)
+            realized_return = st.number_input("Realized return %", value=0.0, step=0.5)
+            drawdown = st.number_input("Max drawdown after signal %", value=0.0, step=0.5)
+            alpha = st.number_input("Alpha vs benchmark %", value=0.0, step=0.5)
+            label = st.selectbox("Outcome label", ["Pending", "Win", "Loss", "Mixed"])
+            lesson = st.text_input("Lesson", value="")
+            if st.button("Update recommendation outcome"):
+                update_recommendation_outcome(
+                    selected_id,
+                    outcome_price=outcome_price,
+                    realized_return_pct=realized_return,
+                    max_drawdown_after_signal=drawdown,
+                    alpha_vs_benchmark_pct=alpha,
+                    outcome_label=label,
+                    lesson=lesson,
+                )
+                st.success("Outcome updated.")
+        else:
+            st.write("No recommendation logs yet.")
+
+    st.write(learning.get("summary", "No learning summary available."))
+    st.caption("Learning dashboard is descriptive research support only. No auto execution or guaranteed returns.")
+    return accuracy
 
 
 def render_opportunistic_stock_screener(screened_assets, research_mode):
@@ -632,6 +1969,52 @@ def render_portfolio_optimizer(
         "Research-only allocation idea: no leverage, no shorting, no live execution, and no broker APIs."
     )
     return optimizer
+
+
+def render_portfolio_optimizer_v1(ranked_assets, research_mode="Balanced"):
+    """Render V1 optimizer view for ranked assets with explicit concentration messaging."""
+    st.header("Portfolio Optimizer")
+    from portfolio_optimizer import optimize_portfolio
+
+    optimized = optimize_portfolio(
+        ranked_assets,
+        research_mode=research_mode,
+    )
+    rows = optimized.get("recommended_allocations", [])
+    if rows:
+        st.dataframe(rows, width="stretch")
+    else:
+        st.write("No recommended allocations were produced.")
+
+    col1, col2 = st.columns(2)
+    col1.metric("Cash allocation", f"{optimized.get('cash_allocation_pct', 0.0):.2f}%")
+    col2.metric("Portfolio risk level", optimized.get("portfolio_risk_level", "Unknown"))
+    st.warning(optimized.get("concentration_warning", "No concentration warning."))
+    st.write(optimized.get("summary", "No optimizer summary available."))
+    st.caption("Research-only optimizer output. No broker APIs, no live trading, no auto execution.")
+    return optimized
+
+
+def render_benchmark_truth(portfolio_returns, benchmark_data):
+    """Render benchmark truth comparison against passive ETF baselines."""
+    st.header("Benchmark Truth Engine")
+    truth = compare_to_benchmarks(
+        portfolio_returns,
+        benchmark_data,
+    )
+    col1, col2 = st.columns(2)
+    col1.metric("Best benchmark", truth.get("best_benchmark", "N/A"))
+    col2.metric("AI vs benchmark", f"{truth.get('ai_outperformance_pct', 0.0):+.2f}%")
+
+    st.write(f"Volatility: {truth.get('volatility_comparison', 'N/A')}")
+    st.write(f"Drawdown: {truth.get('drawdown_comparison', 'N/A')}")
+    st.write(f"Sharpe: {truth.get('sharpe_comparison', 'N/A')}")
+    st.write(f"Verdict: {truth.get('verdict', 'Needs More Data')}")
+    st.write(truth.get("summary", "No benchmark truth summary available."))
+    st.caption(
+        "Research-only benchmark truth. No broker APIs, no live trading, no auto execution, and no guaranteed outperformance."
+    )
+    return truth
 
 
 def render_rebalance_advisor(
@@ -882,6 +2265,7 @@ def render_alpha_engine(
     price_data,
     paper_trade_results=None,
     period="1mo",
+    key_suffix="default",
 ):
     """Render alpha comparison versus a selected benchmark."""
     st.header("Alpha vs Benchmark Engine")
@@ -889,7 +2273,7 @@ def render_alpha_engine(
         "Benchmark",
         ["SPY", "QQQ", "VOO"],
         index=0,
-        key="alpha_benchmark_select",
+        key=f"alpha_benchmark_select_{key_suffix}",
     )
 
     alpha = analyze_alpha_vs_benchmark(
@@ -981,6 +2365,7 @@ def render_auto_paper_trading_control_panel(
     data_confidence,
     existing_position,
     research_mode,
+    final_recommendation=None,
 ):
     """Render auto paper trade ticket preview and save control."""
     ticket = build_auto_paper_trade_ticket(
@@ -996,6 +2381,7 @@ def render_auto_paper_trading_control_panel(
         data_confidence=data_confidence,
         existing_position=existing_position,
         research_mode=research_mode,
+        final_recommendation=final_recommendation,
     )
 
     st.header("Auto Paper Trading Control Panel")
@@ -1036,6 +2422,188 @@ def render_auto_paper_trading_control_panel(
 
     st.caption(ticket.get("disclaimer", "Paper trade simulation only."))
     return ticket
+
+
+def render_ranked_quant_decision_table(
+    screened_assets,
+    opportunity_data,
+    selected_symbol,
+    conviction_data,
+    thesis_health,
+):
+    """Render a clear ranked decision table across screened assets."""
+    st.header("Ranked Quant Decision Table")
+    rows = build_ranked_decision_table(
+        screened_assets,
+        opportunity_data=opportunity_data,
+        selected_symbol=selected_symbol,
+        selected_conviction=conviction_data,
+        selected_thesis_health=thesis_health,
+    )
+    if rows:
+        st.dataframe(rows, width="stretch")
+    else:
+        st.info("No screened assets are available for ranking yet.")
+    st.caption(
+        "Actions are research-only labels. They are not broker orders, trade execution, or guaranteed outcomes."
+    )
+    return rows
+
+
+def render_quant_decision_intelligence(
+    ranked_assets,
+    conviction_scores,
+    signal_outputs,
+    benchmark_truth,
+    portfolio_optimizer,
+    governance_review,
+    walk_forward_results,
+    research_mode="Balanced",
+):
+    """Render the primary research-first decision intelligence layer."""
+    intelligence = build_quant_decision_intelligence(
+        ranked_assets,
+        conviction_scores,
+        signal_outputs,
+        benchmark_truth,
+        portfolio_optimizer,
+        governance_review,
+        walk_forward_results,
+        research_mode=research_mode,
+    )
+
+    st.header("Quant Decision Intelligence")
+    st.caption(
+        "Research-only decision support. No broker APIs, no live trading, no auto execution, "
+        "no guaranteed returns, and no buy-now certainty."
+    )
+
+    opportunities = intelligence.get("best_opportunities", [])
+    if opportunities:
+        table_rows = []
+        for row in opportunities:
+            table_rows.append(
+                {
+                    "Rank": row.get("priority_rank", 0),
+                    "Symbol": row.get("symbol", ""),
+                    "Decision Score": row.get("decision_score", 0),
+                    "Research Action": row.get("research_action", ""),
+                    "Timing View": row.get("timing_view", ""),
+                    "Position Size Hint": row.get("position_size_hint", ""),
+                }
+            )
+        st.dataframe(table_rows, width="stretch")
+
+        for row in opportunities[:5]:
+            with st.expander(
+                f"Why {row.get('symbol', 'asset')} ranked #{row.get('priority_rank', 0)}",
+                expanded=row.get("priority_rank") == 1,
+            ):
+                st.write(f"Research action: {row.get('research_action', 'N/A')}")
+                st.write(f"Timing view: {row.get('timing_view', 'N/A')}")
+                st.write(f"Position size hint: {row.get('position_size_hint', 'N/A')}")
+                st.markdown("**Why**")
+                for item in row.get("why", []):
+                    st.info(f"- {item}")
+    else:
+        st.info("No ranked opportunities are available for decision intelligence yet.")
+
+    col1, col2 = st.columns(2)
+    col1.metric("Portfolio stance", intelligence.get("portfolio_stance", "N/A"))
+    col2.metric(
+        "Human review required",
+        "Yes" if intelligence.get("human_review_required", True) else "No",
+    )
+
+    st.markdown("**Capital deployment view**")
+    st.write(intelligence.get("capital_deployment_view", "No capital view available."))
+
+    st.markdown("**Risk summary**")
+    st.warning(intelligence.get("risk_summary", "No risk summary available."))
+
+    st.markdown("**Benchmark truth summary**")
+    st.write(intelligence.get("benchmark_truth_summary", "No benchmark summary available."))
+
+    st.write(intelligence.get("summary", "No decision intelligence summary available."))
+    return intelligence
+
+
+def render_explainability_panel(
+    signal_data,
+    conviction_data,
+    regime_data,
+    news_context,
+    opportunity_data,
+    risk,
+    exposure_limits_data,
+    thesis_health,
+    confidence_data,
+):
+    """Render weighted engine contributions to the final decision-support score."""
+    st.header("Explainability Panel")
+    explanation = calculate_explainability_panel(
+        signal_data,
+        conviction_data,
+        regime_data,
+        news_context,
+        opportunity_data,
+        risk,
+        exposure_limits_data,
+        thesis_health,
+        confidence_data,
+    )
+    st.metric("Final explainability score", f"{explanation.get('final_score', 0):.1f}/100")
+    st.dataframe(explanation.get("contributions", []), width="stretch")
+    st.write(explanation.get("summary", "No explainability summary available."))
+    st.caption("Transparent weighted logic only. No fake certainty and no guaranteed profit language.")
+    return explanation
+
+
+def render_timing_explanation(regime_data, risk, catalyst_data, thesis_health, signal_data):
+    """Render plain-English timing state for the selected asset."""
+    st.header("Timing Explanation")
+    timing = generate_timing_explanation(
+        regime_data,
+        risk,
+        catalyst_data,
+        thesis_health,
+        signal_data,
+    )
+    st.metric("Timing state", timing.get("timing_label", "wait"))
+    st.write(timing.get("reasoning", "No timing explanation available."))
+    st.caption("Timing language is research-only and does not predict an exact entry price.")
+    return timing
+
+
+def render_position_sizing_modes(position_size_data, risk):
+    """Render conservative, balanced, and aggressive paper sizing recommendations."""
+    st.header("Position Sizing by Research Mode")
+    rows = generate_position_sizing_modes(position_size_data, risk)
+    st.dataframe(rows, width="stretch")
+    st.caption("Paper-trading sizing only. No leverage, options, broker APIs, or live orders.")
+    return rows
+
+
+def render_etf_benchmark_dashboard(period, paper_scorecard=None):
+    """Render ETF benchmark comparisons for the selected evaluation period."""
+    st.header("ETF Benchmark Dashboard")
+    benchmark = compare_etf_benchmarks(period=period)
+    rows = benchmark.get("benchmarks", [])
+    if paper_scorecard:
+        rows = [
+            {
+                "benchmark": "AI paper portfolio",
+                "return_pct": paper_scorecard.get("strategy_total_return_pct", 0.0),
+                "volatility_pct": paper_scorecard.get("drawdown_pct", 0.0),
+                "max_drawdown_pct": paper_scorecard.get("drawdown_pct", 0.0),
+                "sharpe": 0.0,
+                "diversification": "Strategy-dependent",
+            }
+        ] + rows
+    st.dataframe(rows, width="stretch")
+    st.write(benchmark.get("summary", "No benchmark summary available."))
+    st.caption("Benchmarks are comparison baselines only. No guaranteed outperformance.")
+    return benchmark
 
 
 def render_execution_readiness(
@@ -1597,6 +3165,91 @@ def render_catalyst_tracker(symbol, news_context, thesis_health, conviction_data
     )
 
 
+def render_alternative_data_context(symbol):
+    """Render delayed/noisy alternative data as supporting research evidence."""
+    context = generate_alternative_data_context(symbol)
+
+    st.header("Alternative Data Intelligence")
+    col1, col2 = st.columns(2)
+    col1.metric("Alternative data score", f"{context.get('alternative_data_score', 0)}/100")
+    col2.metric("Politician trade signal", context.get("politician_trade_signal", "N/A"))
+
+    st.write(
+        f"**Insider activity signal:** {context.get('insider_activity_signal', 'N/A')}"
+    )
+    st.write(
+        "**Institutional attention signal:** "
+        f"{context.get('institutional_attention_signal', 'N/A')}"
+    )
+
+    st.markdown("**Positive signals**")
+    positives = context.get("positive_signals", [])
+    if positives:
+        for item in positives:
+            st.success(f"- {item}")
+    else:
+        st.write("No positive alternative-data signals available.")
+
+    st.markdown("**Risk flags**")
+    flags = context.get("risk_flags", [])
+    if flags:
+        for item in flags:
+            st.warning(f"- {item}")
+    else:
+        st.write("No alternative-data risk flags in the placeholder layer.")
+
+    st.markdown("**Data limitations**")
+    for item in context.get("data_limitations", []):
+        st.info(f"- {item}")
+
+    with st.expander("Future optional data sources", expanded=False):
+        for name, description in context.get("future_data_sources", {}).items():
+            st.write(f"- {name}: {description}")
+
+    st.write(context.get("summary", "No alternative data summary available."))
+    st.caption(
+        "Research-only alternative data context. Supporting evidence only; no live trading, broker APIs, auto execution, or guaranteed profit claims."
+    )
+    return context
+
+
+def render_fundamental_catalyst_quality(symbol, catalyst_data=None):
+    """Render lightweight fundamental and catalyst quality context."""
+    context = generate_fundamental_catalyst_context(symbol, catalyst_data=catalyst_data)
+    st.header("Fundamental & Catalyst Quality")
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Fundamental quality", context.get("fundamental_quality", "Neutral"))
+    col2.metric("Fundamental score", f"{context.get('fundamental_score', 0)}/100")
+    col3.metric("Earnings date", context.get("earnings_date", "Unknown"))
+
+    st.write(f"Recent filing status: {context.get('recent_filing_status', 'Not connected')}")
+
+    st.markdown("**Positive factors**")
+    positives = context.get("positive_factors", [])
+    if positives:
+        for item in positives:
+            st.success(f"- {item}")
+    else:
+        st.write("No verified positive fundamental factors yet.")
+
+    st.markdown("**Risk flags**")
+    flags = context.get("risk_flags", [])
+    if flags:
+        for item in flags:
+            st.warning(f"- {item}")
+    else:
+        st.write("No major fundamental/catalyst risk flags.")
+
+    st.markdown("**Data limitations**")
+    for item in context.get("data_limitations", []):
+        st.info(f"- {item}")
+
+    st.write(context.get("summary", "No fundamental/catalyst summary available."))
+    st.caption("Fundamental and catalyst context is supporting evidence only. No guaranteed returns.")
+    return context
+
+
 def render_factor_attribution(
     screened_assets,
     portfolio_allocations,
@@ -1990,7 +3643,7 @@ def render_adaptive_learning():
 
     col1, col2 = st.columns(2)
     col1.metric("Learning confidence", insights["learning_confidence"], delta="Rule-based")
-    col2.metric("Suggested adjustments", len(insights["suggested_weight_adjustments"]))
+    col2.metric("Sample size", insights.get("sample_size", 0))
 
     st.markdown("**Positive factors**")
     for factor in insights["strong_positive_factors"]:
@@ -2001,11 +3654,16 @@ def render_adaptive_learning():
         st.warning(f"- {factor}")
 
     st.markdown("**Suggested weight adjustments**")
-    for factor, adjustment in insights["suggested_weight_adjustments"].items():
-        st.write(f"- {factor}: {adjustment:.2f}x")
+    adjustment_rows = insights.get("reviewable_adjustments", [])
+    if adjustment_rows:
+        st.dataframe(adjustment_rows, width="stretch")
+    else:
+        for factor, adjustment in insights["suggested_weight_adjustments"].items():
+            st.write(f"- {factor}: {adjustment:.2f}x")
 
     st.markdown("**Summary**")
     st.write(insights["summary"])
+    st.caption(insights.get("disclaimer", "Research-only adaptive learning."))
 
 
 def render_risk_engine(
@@ -2093,6 +3751,253 @@ def render_research_agent(selected_asset, snapshot, risk, notes=""):
         st.markdown(f"### {summary['overall_stance']}")
 
 
+def _display_agent_list(value):
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            return [value] if value else []
+    return value or []
+
+
+def _save_agent_result_to_recommendation_log(result):
+    agent_names = [row.get("agent_name", "") for row in result.get("agent_evidence", [])]
+    return save_recommendation_log(
+        symbol=result.get("symbol"),
+        action=result.get("final_verdict"),
+        horizon=result.get("lane"),
+        score=result.get("score"),
+        price=result.get("price"),
+        engine_inputs={
+            "source": "Agent Research Desk",
+            "lane": result.get("lane"),
+            "data_confidence": result.get("data_quality", {}).get("data_confidence", "Unknown"),
+            "agent_names": agent_names,
+            "memory_delta": result.get("memory_delta", ""),
+        },
+        data_gate=result.get("data_quality", {}).get("recommendation_gate", ""),
+        suitability_status="Human review required",
+        sector=map_asset_to_sector(result.get("symbol")),
+        market_regime=result.get("market_regime", ""),
+        benchmark_symbol="SPY",
+    )
+
+
+def render_agent_research_desk(
+    selected_asset,
+    screened_assets,
+    financial_profile=None,
+    current_prices=None,
+    key_suffix="agent_research_desk",
+):
+    """Render the hybrid agent research desk with memory and evaluation."""
+    st.header("Agent Research Desk")
+    st.caption(
+        "Hybrid research agents: daily queue plus on-demand ticker research. "
+        "Research-only; no broker APIs, live trading, margin, leverage, direct futures contracts, or guaranteed profit."
+    )
+
+    financial_profile = financial_profile or {}
+    current_prices = current_prices or {}
+    if f"{key_suffix}_queue" not in st.session_state:
+        st.session_state[f"{key_suffix}_queue"] = []
+    if f"{key_suffix}_result" not in st.session_state:
+        st.session_state[f"{key_suffix}_result"] = None
+
+    col1, col2, col3 = st.columns(3)
+    if col1.button("Generate Next Research Queue", key=f"generate_queue_{key_suffix}"):
+        queue_result = generate_daily_agent_queue(screened_assets, limit=12)
+        st.session_state[f"{key_suffix}_queue"] = queue_result.get("queue", [])
+        st.success(queue_result.get("summary", "Generated research queue."))
+
+    ticker = col2.text_input(
+        "Ticker",
+        value=selected_asset or "",
+        key=f"agent_research_ticker_{key_suffix}",
+    ).upper().strip()
+    run_type = col3.selectbox(
+        "Run type",
+        ["On Demand", "Daily Queue"],
+        key=f"agent_run_type_{key_suffix}",
+    )
+
+    queue_rows = st.session_state.get(f"{key_suffix}_queue", [])
+    st.subheader("Daily Agent Queue")
+    if queue_rows:
+        st.dataframe(queue_rows, width="stretch")
+        options = [f"{row.get('symbol')} | {row.get('lane')} | score {row.get('score')}" for row in queue_rows]
+        selected_queue = st.selectbox("Queue candidate", options, key=f"queue_pick_{key_suffix}")
+        selected_symbol = selected_queue.split(" | ")[0]
+        if st.button("Run Selected Queue Candidate", key=f"run_queue_candidate_{key_suffix}"):
+            st.session_state[f"{key_suffix}_result"] = run_agent_research_desk(
+                selected_symbol,
+                run_type="Daily Queue",
+                profile=financial_profile,
+                save_memory=False,
+            )
+    else:
+        st.write("No queue generated yet.")
+
+    if st.button("Run Agent Research", key=f"run_agent_research_{key_suffix}"):
+        st.session_state[f"{key_suffix}_result"] = run_agent_research_desk(
+            ticker,
+            run_type=run_type,
+            profile=financial_profile,
+            save_memory=False,
+        )
+
+    result = st.session_state.get(f"{key_suffix}_result")
+    if result:
+        st.subheader("Judge Verdict")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Verdict", result.get("final_verdict", "Watch"))
+        c2.metric("Lane", result.get("lane", "Needs Data"))
+        c3.metric("Score", f"{result.get('score', 0):.1f}")
+        c4.metric("Data", result.get("data_quality", {}).get("data_confidence", "Unknown"))
+        st.write(result.get("summary", "No agent summary available."))
+        st.info(result.get("memory_delta", "No memory comparison available."))
+
+        if result.get("lane_scores"):
+            st.markdown("**Lane scores**")
+            st.dataframe(
+                [{"lane": lane, "score": score} for lane, score in result.get("lane_scores", {}).items()],
+                width="stretch",
+            )
+
+        st.markdown("**Agent vote table**")
+        evidence_table = []
+        for row in result.get("agent_evidence", []):
+            evidence_table.append(
+                {
+                    "agent": row.get("agent_name"),
+                    "status": row.get("status"),
+                    "score": row.get("score"),
+                    "key_points": " | ".join(_display_agent_list(row.get("key_points"))[:2]),
+                    "concerns": " | ".join(_display_agent_list(row.get("concerns"))[:2]),
+                    "recommendation": row.get("recommendation"),
+                }
+            )
+        st.dataframe(evidence_table, width="stretch")
+
+        c_bull, c_bear = st.columns(2)
+        with c_bull:
+            st.markdown("**Bull case**")
+            for item in result.get("bull_case", []) or ["No bull case saved."]:
+                st.write(f"- {item}")
+        with c_bear:
+            st.markdown("**Bear case**")
+            for item in result.get("bear_case", []) or ["No bear case saved."]:
+                st.write(f"- {item}")
+
+        st.markdown("**Invalidation triggers**")
+        for item in result.get("invalidation_triggers", []):
+            st.write(f"- {item}")
+
+        if st.button("Save Verdict To Memory", key=f"save_agent_memory_{key_suffix}"):
+            run_row = save_agent_run(
+                symbol=result.get("symbol"),
+                run_type=result.get("run_type", "On Demand"),
+                lane=result.get("lane"),
+                data_confidence=result.get("data_quality", {}).get("data_confidence", "Unknown"),
+                final_verdict=result.get("final_verdict"),
+                confidence=result.get("confidence"),
+                score=result.get("score"),
+                summary=result.get("summary"),
+                thesis_snapshot=result.get("thesis_snapshot", ""),
+                memory_delta=result.get("memory_delta", ""),
+                human_review_required=True,
+            )
+            result["run_id"] = run_row.get("id")
+            for evidence_row in result.get("agent_evidence", []):
+                save_agent_evidence(run_id=result["run_id"], **evidence_row)
+            save_ticker_memory(
+                symbol=result.get("symbol"),
+                thesis=result.get("thesis_snapshot", result.get("summary", "")),
+                bull_case=" | ".join(result.get("bull_case", [])[:4]),
+                bear_case=" | ".join(result.get("bear_case", [])[:4]),
+                last_verdict=result.get("final_verdict"),
+                last_lane=result.get("lane"),
+                lessons=(result.get("memory") or {}).get("lessons", ""),
+            )
+            _save_agent_result_to_recommendation_log(result)
+            st.session_state[f"{key_suffix}_result"] = result
+            st.success("Saved structured agent memory, narrative ticker memory, evidence, and recommendation log entry.")
+
+    st.subheader("Prior Memory")
+    memory_symbol = ticker or selected_asset
+    prior_memory = load_ticker_memory(memory_symbol)
+    prior_runs = load_agent_runs(symbol=memory_symbol, limit=10)
+    if prior_memory:
+        st.write(prior_memory.get("thesis", "No thesis memory available."))
+        st.caption(
+            f"Last verdict: {prior_memory.get('last_verdict', 'Unknown')} | "
+            f"Last lane: {prior_memory.get('last_lane', 'Unknown')} | "
+            f"Updated: {prior_memory.get('updated_at', '')}"
+        )
+    else:
+        st.write("No narrative memory saved for this ticker yet.")
+    if prior_runs:
+        st.dataframe(prior_runs, width="stretch")
+
+    st.subheader("Update Outcome")
+    logs = load_recommendation_log(symbol=memory_symbol)
+    if logs:
+        options = [
+            f"{row.get('id')} | {row.get('symbol')} | {row.get('action')} | {row.get('horizon')}"
+            for row in logs
+        ]
+        selected = st.selectbox("Agent-linked recommendation", options, key=f"agent_outcome_pick_{key_suffix}")
+        log_id = int(selected.split(" | ")[0])
+        outcome_price = st.number_input("Outcome price", min_value=0.0, value=0.0, step=1.0, key=f"agent_outcome_price_{key_suffix}")
+        realized_return = st.number_input("Realized return %", value=0.0, step=0.5, key=f"agent_realized_{key_suffix}")
+        drawdown = st.number_input("Max drawdown after signal %", value=0.0, step=0.5, key=f"agent_drawdown_{key_suffix}")
+        alpha = st.number_input("Alpha vs benchmark %", value=0.0, step=0.5, key=f"agent_alpha_{key_suffix}")
+        label = st.selectbox("Outcome label", ["", "Win", "Loss", "Flat", "Good", "Poor"], key=f"agent_label_{key_suffix}")
+        lesson = st.text_input("Lesson", value="", key=f"agent_lesson_{key_suffix}")
+        if st.button("Update Outcome", key=f"agent_update_outcome_{key_suffix}"):
+            update_recommendation_outcome(
+                log_id,
+                outcome_price=outcome_price,
+                realized_return_pct=realized_return,
+                max_drawdown_after_signal=drawdown,
+                alpha_vs_benchmark_pct=alpha,
+                outcome_label=label,
+                lesson=lesson,
+            )
+            st.success("Outcome updated for evaluation memory.")
+    else:
+        st.write("No saved recommendation log rows for this ticker yet.")
+
+    st.subheader("Agent Evaluation")
+    evaluation = evaluate_agent_research_memory(
+        agent_runs=load_agent_runs(limit=250),
+        evidence_rows=load_agent_evidence(limit=1000),
+        recommendation_log=load_recommendation_log(),
+    )
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Agent runs", evaluation.get("total_agent_runs", 0))
+    c2.metric("Evidence rows", evaluation.get("total_agent_evidence", 0))
+    c3.metric("Evaluated", evaluation.get("evaluated_recommendations", 0))
+    st.write(evaluation.get("summary", "No evaluation summary available."))
+    if evaluation.get("lane_stats"):
+        st.markdown("**By lane**")
+        st.dataframe(evaluation.get("lane_stats"), width="stretch")
+    if evaluation.get("verdict_stats"):
+        st.markdown("**By verdict**")
+        st.dataframe(evaluation.get("verdict_stats"), width="stretch")
+    if evaluation.get("agent_activity"):
+        st.markdown("**Agent activity**")
+        st.dataframe(evaluation.get("agent_activity"), width="stretch")
+
+    return {
+        "queue": queue_rows,
+        "latest_result": result,
+        "evaluation": evaluation,
+    }
+
+
 def render_agent_task_runner(
     symbol,
     snapshot,
@@ -2154,6 +4059,7 @@ def render_agent_task_runner(
 def render_signal_engine(selected_asset, snapshot, risk, price_data=None):
     """Render the signal engine section and allow saving predictions."""
     news_context = generate_news_context(selected_asset)
+    alternative_data_context = generate_alternative_data_context(selected_asset)
     adaptive_context = calculate_factor_insights(load_predictions(), load_research_runs())
     signal_data = generate_signal(
         selected_asset,
@@ -2161,6 +4067,7 @@ def render_signal_engine(selected_asset, snapshot, risk, price_data=None):
         risk,
         news_context=news_context,
         adaptive_context=adaptive_context,
+        alternative_data_context=alternative_data_context,
     )
     backtest_return = None
     if price_data is not None:
@@ -2176,6 +4083,7 @@ def render_signal_engine(selected_asset, snapshot, risk, price_data=None):
         st.write(f"**Final score:** {signal_data['score']}/100")
         st.write(f"- Quant score: {signal_data.get('quant_score', 0)}")
         st.write(f"- News score: {signal_data.get('news_score', 0)}")
+        st.write(f"- Alternative data adjustment: {signal_data.get('alternative_data_score', 0)}")
 
         st.markdown("**Reasons**")
         for reason in signal_data["reasons"]:
@@ -2519,6 +4427,230 @@ def render_decision_journal(symbol, trade_decision, snapshot):
         st.write("No evaluated outcomes yet.")
 
 
+def render_experiment_tracker():
+    """Render experiment tracking for research/model strategy iterations."""
+    st.header("Experiment Tracker")
+    st.caption("Quick examples:")
+    st.code(
+        "Test SMA50 vs SMA20\n"
+        "Add news-aware scoring\n"
+        "Change conservative allocation cap\n"
+        "Add sector context to portfolio optimizer",
+        language="text",
+    )
+
+    with st.form("experiment_form"):
+        experiment_name = st.text_input("Experiment name")
+        experiment_type = st.selectbox(
+            "Experiment type",
+            ["Strategy", "Signal", "Research Mode", "Portfolio", "Data", "Other"],
+            index=0,
+        )
+        description = st.text_area("Description", height=80)
+        changed_modules = st.text_input("Changed modules (comma separated)")
+        hypothesis = st.text_area("Hypothesis", height=70)
+        metrics_before = st.text_input("Metrics before")
+        status = st.selectbox(
+            "Status",
+            ["Planned", "Running", "Completed", "Rejected"],
+            index=0,
+        )
+        save_clicked = st.form_submit_button("Save experiment")
+
+    if save_clicked:
+        if experiment_name.strip():
+            save_experiment(
+                experiment_name=experiment_name.strip(),
+                experiment_type=experiment_type,
+                description=description.strip(),
+                changed_modules=changed_modules.strip(),
+                hypothesis=hypothesis.strip(),
+                metrics_before=metrics_before.strip(),
+                status=status,
+            )
+            st.success("Experiment saved.")
+        else:
+            st.warning("Experiment name is required.")
+
+    experiments = load_experiments()
+    st.subheader("Recent experiments")
+    if experiments:
+        st.dataframe(experiments[:10], width="stretch")
+    else:
+        st.write("No experiments tracked yet.")
+
+    with st.expander("Update Experiment Result", expanded=False):
+        names = [
+            row.get("experiment_name", "")
+            for row in experiments
+            if row.get("experiment_name")
+        ]
+        selected_name = st.selectbox("Experiment", names) if names else ""
+        result_summary = st.text_input("Result summary", value="")
+        lesson = st.text_area("Lesson learned", height=70)
+        metrics_after = st.text_input("Metrics after", value="")
+        update_status = st.selectbox(
+            "Status update",
+            ["Completed", "Running", "Rejected", "Planned"],
+            index=0,
+        )
+        if st.button("Update experiment"):
+            if selected_name:
+                updated = update_experiment_result(
+                    experiment_name=selected_name,
+                    result=result_summary.strip() or "Updated",
+                    lesson=lesson.strip(),
+                    status=update_status,
+                    metrics_after=metrics_after.strip(),
+                )
+                if updated:
+                    st.success("Experiment updated.")
+                else:
+                    st.warning("Could not find that experiment name.")
+            else:
+                st.warning("No experiment selected.")
+
+    st.subheader("Experiment Comparator")
+    st.caption(
+        "Example metrics format: win_rate=55, avg_return=4.2, avg_alpha=1.1, max_drawdown=-8, consistency_score=70"
+    )
+    comparator_before = st.text_input(
+        "Metrics before",
+        value="win_rate=55, avg_return=4.2, avg_alpha=1.1, max_drawdown=-8, consistency_score=70",
+        key="experiment_comparator_before",
+    )
+    comparator_after = st.text_input(
+        "Metrics after",
+        value="win_rate=58, avg_return=4.8, avg_alpha=1.4, max_drawdown=-6.5, consistency_score=75",
+        key="experiment_comparator_after",
+    )
+
+    if st.button("Compare Results"):
+        comparison = compare_experiment_results(comparator_before, comparator_after)
+        st.markdown("**Improved metrics**")
+        if comparison.get("improved_metrics"):
+            for row in comparison["improved_metrics"]:
+                st.success(f"- {row}")
+        else:
+            st.write("None")
+
+        st.markdown("**Worsened metrics**")
+        if comparison.get("worsened_metrics"):
+            for row in comparison["worsened_metrics"]:
+                st.warning(f"- {row}")
+        else:
+            st.write("None")
+
+        st.metric("Overall result", comparison.get("overall_result", "Inconclusive"))
+        st.write(comparison.get("summary", "No summary available."))
+
+    st.caption(
+        "Research-only experiment tracking. No live trading, no broker APIs, no auto execution."
+    )
+
+
+def render_research_review_agent(
+    prediction_summary=None,
+    research_run_summary=None,
+    experiment_summary=None,
+    leaderboard_summary=None,
+    portfolio_performance=None,
+):
+    """Render an automated review agent for research learning quality."""
+    review = generate_research_review(
+        prediction_summary=prediction_summary,
+        research_run_summary=research_run_summary,
+        experiment_summary=experiment_summary,
+        leaderboard_summary=leaderboard_summary,
+        portfolio_performance=portfolio_performance,
+    )
+
+    st.header("Automated Research Review Agent")
+    st.metric("System status", review.get("overall_system_status", "Insufficient Data"))
+
+    st.markdown("**What is working**")
+    for item in review.get("what_is_working", []):
+        st.success(f"- {item}")
+
+    st.markdown("**What is not working**")
+    for item in review.get("what_is_not_working", []):
+        st.warning(f"- {item}")
+
+    st.markdown("**Biggest risks**")
+    for item in review.get("biggest_risks", []):
+        st.error(f"- {item}")
+
+    st.markdown("**Recommended next experiments**")
+    for item in review.get("recommended_next_experiments", []):
+        st.info(f"- {item}")
+
+    st.markdown("**Developer notes**")
+    for item in review.get("developer_notes", []):
+        st.write(f"- {item}")
+
+    st.write(review.get("summary", "No summary available."))
+    st.caption(
+        "Research-only review guidance. No broker APIs, no live trading, no auto execution, and no guaranteed returns."
+    )
+    return review
+
+
+def render_governance_review(
+    meta_decision=None,
+    conviction_data=None,
+    execution_data=None,
+    position_size_data=None,
+    prediction_accuracy=None,
+    benchmark_data=None,
+    research_mode="Balanced",
+):
+    """Render model governance and safety checks for research conclusions."""
+    governance = run_governance_review(
+        meta_decision=meta_decision,
+        conviction_data=conviction_data,
+        execution_data=execution_data,
+        position_size_data=position_size_data,
+        prediction_accuracy=prediction_accuracy,
+        benchmark_data=benchmark_data,
+        research_mode=research_mode,
+    )
+
+    st.header("Model Governance / Safety Review")
+    col1, col2 = st.columns(2)
+    col1.metric("Governance status", governance.get("governance_status", "Needs Review"))
+    col2.metric("Evidence quality", governance.get("evidence_quality", "Low"))
+
+    st.markdown("**Overconfidence flags**")
+    flags = governance.get("overconfidence_flags", [])
+    if flags:
+        for item in flags:
+            st.warning(f"- {item}")
+    else:
+        st.write("None")
+
+    st.markdown("**Risk flags**")
+    risks = governance.get("risk_flags", [])
+    if risks:
+        for item in risks:
+            st.error(f"- {item}")
+    else:
+        st.write("None")
+
+    st.markdown("**Required disclaimers**")
+    for item in governance.get("required_disclaimers", []):
+        st.info(f"- {item}")
+
+    st.markdown("**Approval notes**")
+    for item in governance.get("approval_notes", []):
+        st.write(f"- {item}")
+
+    st.write(governance.get("summary", "No governance summary available."))
+    st.caption(
+        "Research-only governance review. Human review is always required. No broker APIs, live trading, or auto execution."
+    )
+    return governance
+
+
 def render_research_journal(watchlist, selected_asset):
     """Render the research journal form and recent entries."""
     with st.expander("Add Research Journal Entry", expanded=True):
@@ -2758,3 +4890,57 @@ def render_executive_dashboard(
     st.write(summary.get("summary", "No summary available."))
     st.caption("Research-only decision support. No broker APIs, no live trading, no auto execution.")
     return summary
+
+
+def render_prediction_accuracy_dashboard(prediction_log, benchmark_returns=None):
+    """Render prediction accuracy and calibration quality over time."""
+    st.header("Prediction Accuracy Dashboard")
+    accuracy = evaluate_prediction_accuracy(
+        prediction_log,
+        benchmark_returns=benchmark_returns,
+    )
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Win rate", f"{accuracy.get('win_rate', 0.0):.2f}%")
+    col2.metric("Avg return after signal", f"{accuracy.get('avg_return_after_signal', 0.0):+.2f}%")
+    col3.metric("False positive rate", f"{accuracy.get('false_positive_rate', 0.0):.2f}%")
+    col4.metric("Alpha vs ETF benchmark", f"{accuracy.get('alpha_vs_benchmark', 0.0):+.2f}%")
+
+    col5, col6, col7 = st.columns(3)
+    col5.metric("Avg drawdown after signal", f"{accuracy.get('avg_drawdown_after_signal', 0.0):.2f}%")
+    col6.metric("Best holding window", accuracy.get("best_holding_window", "Not enough data"))
+    col7.metric("Sample confidence", accuracy.get("sample_confidence", "No evidence yet"))
+
+    st.write(f"Worst holding window: {accuracy.get('worst_holding_window', 'Not enough data')}")
+
+    with st.expander("Calibration breakdowns", expanded=False):
+        grouped_sections = [
+            ("By signal", accuracy.get("grouped_by_signal", [])),
+            ("By regime", accuracy.get("grouped_by_regime", [])),
+            ("By horizon", accuracy.get("grouped_by_horizon", [])),
+            ("By asset class", accuracy.get("grouped_by_asset_class", [])),
+        ]
+        for label, rows in grouped_sections:
+            st.markdown(f"**{label}**")
+            if rows:
+                st.dataframe(rows, width="stretch")
+            else:
+                st.write("No grouped data yet.")
+
+    st.write("**Lessons learned**")
+    lessons = accuracy.get("lessons", [])
+    if lessons:
+        for lesson in lessons:
+            st.info(f"- {lesson}")
+    else:
+        st.write("No lessons available yet.")
+
+    st.write("**Calibration summary**")
+    st.write(accuracy.get("summary", "No calibration summary available."))
+    st.caption(
+        accuracy.get(
+            "disclaimer",
+            "Research-only accuracy tracking. No broker APIs, no auto execution, and no guaranteed future returns.",
+        )
+    )
+    return accuracy

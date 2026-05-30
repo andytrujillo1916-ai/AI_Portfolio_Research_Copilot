@@ -58,6 +58,12 @@ class AdaptiveLearningEngineTests(unittest.TestCase):
         self.assertIn("volatility", result["suggested_weight_adjustments"])
         self.assertIn("strong_positive_factors", result)
         self.assertIn("weak_negative_factors", result)
+        self.assertIn("reviewable_adjustments", result)
+        self.assertIn("disclaimer", result)
+        for adjustment in result["suggested_weight_adjustments"].values():
+            self.assertGreaterEqual(adjustment, 0.85)
+            self.assertLessEqual(adjustment, 1.10)
+        self.assertIn("human review", result["disclaimer"].lower())
 
 
 if __name__ == "__main__":

@@ -39,12 +39,18 @@ def run_cross_asset_screen(watchlist, period="1mo"):
                     "score": signal_data.get("score", 0),
                     "regime": regime,
                     "data_source": price_quality.get("source", snapshot_quality.get("source", "unknown")),
+                    "data_provider": price_quality.get("provider", snapshot_quality.get("provider", "unknown")),
                     "data_confidence": "Low"
                     if "Low" in {snapshot_quality.get("data_confidence"), price_quality.get("data_confidence")}
                     else "Medium"
                     if "Medium" in {snapshot_quality.get("data_confidence"), price_quality.get("data_confidence")}
                     else "High",
                     "data_quality_status": price_quality.get("status", "Unknown"),
+                    "recommendation_gate": "Blocked"
+                    if "Blocked" in {snapshot_quality.get("recommendation_gate"), price_quality.get("recommendation_gate")}
+                    else "Warning"
+                    if "Warning" in {snapshot_quality.get("recommendation_gate"), price_quality.get("recommendation_gate")}
+                    else "Trusted",
                     "last_timestamp": price_quality.get("last_timestamp") or snapshot_quality.get("last_timestamp"),
                     "data_issues": " | ".join(snapshot_quality.get("issues", []) + price_quality.get("issues", [])),
                 }
