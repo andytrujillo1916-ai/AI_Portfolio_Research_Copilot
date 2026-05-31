@@ -36,6 +36,9 @@ def test_short_term_trade_plan_has_required_sell_and_review_fields():
     assert plan["trim_rules"]
     assert plan["time_stop"]
     assert plan["next_review_time"]
+    assert plan["preferred_entry_window"]
+    assert plan["preferred_exit_window"]
+    assert plan["reason_stack"]
     assert any("Thesis break" in item for item in plan["sell_triggers"])
 
 
@@ -105,3 +108,22 @@ def test_long_term_plan_outputs_staged_buy_action():
 
     assert plan["long_term_action"] == "Buy Now"
     assert "thesis review" in plan["max_holding_window"].lower()
+
+
+def test_friday_weekend_risk_tightens_short_term_review_window():
+    inputs = _base_plan_inputs()
+    inputs["microstructure_context"] = {
+        "day_of_week_context": "Friday weekend-risk review",
+        "timing_bias": "Prefer Close Review",
+        "preferred_entry_window": "Prefer late-session review only if the trade plan already supports entry.",
+        "preferred_exit_window": "For short-term plans, review exit or trim before the close to manage weekend-gap risk.",
+        "sell_timing_reason": "For short-term plans, review exit or trim before the close to manage weekend-gap risk.",
+        "microstructure_score": 54.0,
+        "calendar_context": ["Friday weekend-risk review"],
+        "paper_trade_allowed": True,
+        "reason_stack": [],
+    }
+    plan = build_trade_plan(**inputs, strategy_type="Short Term")
+
+    assert "Friday close" in plan["max_holding_window"]
+    assert any("weekend-gap risk" in item for item in plan["sell_triggers"])

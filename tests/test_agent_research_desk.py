@@ -88,9 +88,13 @@ def test_bull_bear_critic_always_outputs_both_sides_and_triggers():
 
     agent_names = {row["agent_name"] for row in result["agent_evidence"]}
     assert "Bull/Bear Critic" in agent_names
+    assert "Microstructure/Calendar Agent" in agent_names
+    assert "Exit Plan Agent" in agent_names
     assert result["bull_case"]
     assert result["bear_case"]
     assert result["invalidation_triggers"]
+    assert result["reason_stack"]
+    assert result["judge_explanation"]["entry_timing"]
 
 
 def test_agent_memory_saves_and_reloads_structured_and_narrative_rows():

@@ -40,7 +40,8 @@ def evaluate_data_quality(data_result, max_age_hours=72):
         issues.append(f"Data fetch issue: {error}")
     if timestamp is None:
         issues.append("No last timestamp available.")
-    if isinstance(data_payload, dict) and not data_payload.get("Close") and "price" not in data_payload:
+    has_explicit_payload = any(key in data_result for key in {"data", "price", "Close", "symbol"})
+    if has_explicit_payload and isinstance(data_payload, dict) and not data_payload.get("Close") and "price" not in data_payload:
         missing_fields.append("price_or_close")
     if hasattr(data_payload, "empty") and data_payload.empty:
         missing_fields.append("price_history")
@@ -75,6 +76,13 @@ def evaluate_data_quality(data_result, max_age_hours=72):
         "provider": metadata.get("provider", source),
         "source_url": metadata.get("source_url", ""),
         "source_type": metadata.get("source_type", "Unknown"),
+        "source_trust": metadata.get("trust_level", "Warning"),
+        "freshness_confidence": confidence,
+        "allowed_use": "display_only"
+        if recommendation_gate == "Blocked"
+        else "research_and_recommendation"
+        if recommendation_gate == "Trusted"
+        else "research_only",
         "last_timestamp": timestamp.isoformat() if timestamp else "",
         "is_fallback": is_fallback,
         "is_stale": any("stale" in issue.lower() for issue in issues),
@@ -98,9 +106,12 @@ def summarize_data_sources(screened_assets=None, selected_snapshot=None, selecte
                 "dataset": "snapshot",
                 "source": quality["source"],
                 "provider": quality["provider"],
+                "source_trust": quality.get("source_trust", "Warning"),
+                "freshness_confidence": quality.get("freshness_confidence", quality["data_confidence"]),
                 "confidence": quality["data_confidence"],
                 "status": quality["status"],
                 "recommendation_gate": quality["recommendation_gate"],
+                "allowed_use": quality.get("allowed_use", "research_only"),
                 "last_timestamp": quality["last_timestamp"],
                 "issues": " | ".join(quality["issues"]),
             }
@@ -114,9 +125,12 @@ def summarize_data_sources(screened_assets=None, selected_snapshot=None, selecte
                 "dataset": "history",
                 "source": quality["source"],
                 "provider": quality["provider"],
+                "source_trust": quality.get("source_trust", "Warning"),
+                "freshness_confidence": quality.get("freshness_confidence", quality["data_confidence"]),
                 "confidence": quality["data_confidence"],
                 "status": quality["status"],
                 "recommendation_gate": quality["recommendation_gate"],
+                "allowed_use": quality.get("allowed_use", "research_only"),
                 "last_timestamp": quality["last_timestamp"],
                 "issues": " | ".join(quality["issues"]),
             }
@@ -129,9 +143,12 @@ def summarize_data_sources(screened_assets=None, selected_snapshot=None, selecte
                 "dataset": "screener",
                 "source": asset.get("data_source", "unknown"),
                 "provider": asset.get("data_provider", asset.get("data_source", "unknown")),
+                "source_trust": asset.get("source_trust", "Warning"),
+                "freshness_confidence": asset.get("freshness_confidence", asset.get("data_confidence", "Unknown")),
                 "confidence": asset.get("data_confidence", "Unknown"),
                 "status": asset.get("data_quality_status", "Unknown"),
                 "recommendation_gate": asset.get("recommendation_gate", "Warning"),
+                "allowed_use": asset.get("allowed_use", "research_only"),
                 "last_timestamp": asset.get("last_timestamp", ""),
                 "issues": asset.get("data_issues", ""),
             }

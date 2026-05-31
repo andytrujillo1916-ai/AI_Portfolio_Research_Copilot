@@ -12,10 +12,12 @@ from db_service import (
 )
 from final_recommendation_engine import build_final_recommendation
 from fundamental_catalyst_engine import generate_fundamental_catalyst_context
+from market_microstructure_engine import build_microstructure_context, build_reason_stack
 from market_data import get_market_snapshot, get_price_history, get_risk_metrics
 from multi_horizon_router import route_multi_horizon_opportunity
 from regime_engine import detect_market_regime
 from signal_engine import generate_signal
+from research_data_hub import build_source_manifest_item
 
 
 FUTURES_PROXY_SYMBOLS = {
@@ -171,7 +173,18 @@ def _agent_result(agent_name, score, key_points, concerns=None, sources=None, me
     }
 
 
-def _build_agent_evidence(symbol, lane_data, data_quality, news_context, fundamentals, risk, regime_data, profile, prior_memory):
+def _build_agent_evidence(
+    symbol,
+    lane_data,
+    data_quality,
+    news_context,
+    fundamentals,
+    risk,
+    regime_data,
+    profile,
+    prior_memory,
+    microstructure_context=None,
+):
     symbol = str(symbol or "").upper()
     memory_refs = []
     if prior_memory:
@@ -246,6 +259,26 @@ def _build_agent_evidence(symbol, lane_data, data_quality, news_context, fundame
         )
     )
 
+    microstructure_context = microstructure_context or {}
+    micro_score = _safe_float(microstructure_context.get("microstructure_score"), 45.0)
+    micro_concerns = list(microstructure_context.get("blockers", [])) + list(microstructure_context.get("warnings", []))
+    evidence.append(
+        _agent_result(
+            "Microstructure/Calendar Agent",
+            micro_score,
+            [
+                microstructure_context.get("summary", "Market microstructure and calendar context reviewed."),
+                f"Timing bias: {microstructure_context.get('timing_bias', 'No Timing Edge')}.",
+                f"Entry window: {microstructure_context.get('preferred_entry_window', 'Follow the trade plan.')}",
+                f"Exit window: {microstructure_context.get('preferred_exit_window', 'Use named exit triggers.')}",
+            ],
+            micro_concerns,
+            ["session clock", "day-of-week context", "turn-of-month context", "liquidity checks"],
+            memory_refs,
+            "Use timing context only as a weak-to-moderate modifier; it cannot create a buy/add verdict by itself.",
+        )
+    )
+
     futures_score = lane_data.get("scores", {}).get("Futures Proxy", 0.0)
     proxy_note = FUTURES_PROXY_SYMBOLS.get(symbol, "Not a direct futures proxy symbol.")
     evidence.append(
@@ -276,6 +309,23 @@ def _build_agent_evidence(symbol, lane_data, data_quality, news_context, fundame
             ["financial profile", "risk metrics"],
             memory_refs,
             "Keep sizing conservative and compare against benchmark before adding risk.",
+        )
+    )
+
+    exit_score = 68.0 if data_quality.get("recommendation_gate") != "Blocked" else 35.0
+    evidence.append(
+        _agent_result(
+            "Exit Plan Agent",
+            exit_score,
+            [
+                "Sell if the thesis breaks, the stop is hit, the time stop expires, or market risk downgrades.",
+                "Trim at the first target or when conviction weakens while still profitable.",
+                microstructure_context.get("sell_timing_reason", "Use named sell/trim triggers rather than time-of-day alone."),
+            ],
+            ["Exit plan still requires human review before any real-world action."],
+            ["trade plan rules", "microstructure timing context", "risk metrics"],
+            memory_refs,
+            "No plan is valid unless sell, trim, stop, invalidation, and review timing are named.",
         )
     )
 
@@ -314,6 +364,23 @@ def _build_agent_evidence(symbol, lane_data, data_quality, news_context, fundame
     return evidence
 
 
+def _judge_explanation(final, data_quality, lane_data, microstructure_context, reason_stack):
+    support = [row for row in reason_stack if row.get("direction") == "Supports"][:3]
+    caution = [row for row in reason_stack if row.get("direction") in {"Warns", "Blocks"}][:3]
+    return {
+        "data_gate": (
+            f"Data gate {data_quality.get('recommendation_gate', 'Warning')} "
+            f"with {data_quality.get('data_confidence', 'Unknown')} confidence."
+        ),
+        "best_lane": lane_data.get("lane", "Needs Data"),
+        "top_supporting_reasons": [row.get("reason", "") for row in support],
+        "top_caution_reasons": [row.get("reason", "") for row in caution],
+        "entry_timing": microstructure_context.get("preferred_entry_window", "Follow the trade plan."),
+        "sell_trim_timing": microstructure_context.get("preferred_exit_window", "Use named sell/trim triggers."),
+        "what_would_change_this": final.get("what_would_change_this", []),
+    }
+
+
 def _memory_delta(prior_memory, final_verdict, lane):
     if not prior_memory:
         return "No prior narrative memory for this ticker."
@@ -339,6 +406,9 @@ def run_agent_research_desk(
     fundamentals=None,
     profile=None,
     save_memory=False,
+    microstructure_context=None,
+    quote_data=None,
+    now=None,
 ):
     """Run the specialist-agent research desk and optionally persist memory."""
     symbol = str(symbol or "").upper().strip()
@@ -361,8 +431,31 @@ def run_agent_research_desk(
     prior_memory = load_ticker_memory(symbol)
     prior_runs = load_agent_runs(symbol=symbol, limit=5)
     data_quality = _combine_quality(snapshot, price_data)
+    data_source_manifest = [
+        build_source_manifest_item(symbol, "snapshot", snapshot),
+        build_source_manifest_item(symbol, "history", price_data),
+    ]
     lane_data = _build_lane_scores(symbol, signal_data, risk, fundamentals, regime_data, news_context, data_quality, profile)
-    evidence = _build_agent_evidence(symbol, lane_data, data_quality, news_context, fundamentals, risk, regime_data, profile, prior_memory)
+    microstructure_context = microstructure_context or build_microstructure_context(
+        symbol,
+        snapshot=snapshot,
+        price_data=price_data,
+        quote_data=quote_data,
+        now=now,
+        data_quality=data_quality,
+    )
+    evidence = _build_agent_evidence(
+        symbol,
+        lane_data,
+        data_quality,
+        news_context,
+        fundamentals,
+        risk,
+        regime_data,
+        profile,
+        prior_memory,
+        microstructure_context=microstructure_context,
+    )
 
     engine_votes = []
     for item in evidence:
@@ -371,6 +464,15 @@ def run_agent_research_desk(
         action = "Buy Candidate" if item["score"] >= 74 else "Watch" if item["score"] >= 45 else "Avoid"
         if item["agent_name"] == "Data Quality Agent" and data_quality.get("recommendation_gate") == "Blocked":
             action = "Needs Data"
+        if item["agent_name"] == "Microstructure/Calendar Agent":
+            if microstructure_context.get("blockers"):
+                action = "Needs Data"
+            elif microstructure_context.get("timing_bias") in {"Avoid Open", "Wait for Stabilization"}:
+                action = "Wait for Pullback"
+            else:
+                action = "Watch"
+        if item["agent_name"] == "Exit Plan Agent":
+            action = "Needs Data" if data_quality.get("recommendation_gate") == "Blocked" else "Watch"
         if item["agent_name"] == "Futures Proxy Agent" and lane_data.get("lane") == "Futures Proxy":
             action = "Buy Candidate" if item["score"] >= 70 else "Watch"
         engine_votes.append(
@@ -405,6 +507,17 @@ def run_agent_research_desk(
         final["paper_trade_eligible"] = False
 
     critic = next((item for item in evidence if item["agent_name"] == "Bull/Bear Critic"), {})
+    reason_stack = build_reason_stack(
+        data_quality=data_quality,
+        lane=lane_data.get("lane", "Needs Data"),
+        final_recommendation=final,
+        microstructure_context=microstructure_context,
+        risk=risk,
+        news_context=news_context,
+        fundamentals=fundamentals,
+        agent_evidence=evidence,
+    )
+    judge_explanation = _judge_explanation(final, data_quality, lane_data, microstructure_context, reason_stack)
     memory_delta = _memory_delta(prior_memory, final.get("final_verdict", "Watch"), lane_data.get("lane", "Needs Data"))
     thesis_snapshot = (
         f"{symbol}: {final.get('final_verdict', 'Watch')} in {lane_data.get('lane', 'Needs Data')} lane. "
@@ -426,6 +539,10 @@ def run_agent_research_desk(
         "bull_case": critic.get("bull_case", []),
         "bear_case": critic.get("bear_case", []),
         "invalidation_triggers": critic.get("invalidation_triggers", []),
+        "microstructure_context": microstructure_context,
+        "reason_stack": reason_stack,
+        "judge_explanation": judge_explanation,
+        "data_source_manifest": data_source_manifest,
         "memory": prior_memory,
         "prior_runs": prior_runs,
         "memory_delta": memory_delta,

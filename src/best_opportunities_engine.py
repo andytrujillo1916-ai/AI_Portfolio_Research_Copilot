@@ -2,8 +2,10 @@ from asset_sector_map import map_asset_to_sector
 from data_quality_engine import evaluate_data_quality
 from final_recommendation_engine import build_final_recommendation
 from fundamental_catalyst_engine import generate_fundamental_catalyst_context
+from market_microstructure_engine import build_microstructure_context, build_reason_stack
 from market_data import get_market_snapshot, get_price_history, get_risk_metrics
 from multi_horizon_router import route_multi_horizon_opportunity
+from research_data_hub import build_source_manifest_item
 from regime_engine import detect_market_regime
 from sec_edgar_fundamentals import get_sec_fundamental_context
 from signal_engine import generate_signal
@@ -141,6 +143,16 @@ def run_any_ticker_research(symbol, profile=None, accuracy_context=None, market_
     chart_input = price_data.get("data") if isinstance(price_data, dict) else price_data
     risk = get_risk_metrics(chart_input)
     quality = _combined_quality(snapshot, price_data)
+    data_source_manifest = [
+        build_source_manifest_item(symbol, "snapshot", snapshot),
+        build_source_manifest_item(symbol, "history", price_data),
+    ]
+    microstructure_context = build_microstructure_context(
+        symbol,
+        snapshot=snapshot,
+        price_data=price_data,
+        data_quality=quality,
+    )
     news_context = _generate_news_context(symbol)
     signal_data = generate_signal(symbol, snapshot, risk, news_context=news_context)
     regime_data = detect_market_regime(price_data, risk)
@@ -178,6 +190,16 @@ def run_any_ticker_research(symbol, profile=None, accuracy_context=None, market_
             "score": quality.get("data_confidence", ""),
             "reason": quality.get("summary", ""),
         },
+        {
+            "engine": "Microstructure/Calendar Context",
+            "action": "Needs Data"
+            if microstructure_context.get("blockers")
+            else "Wait for Pullback"
+            if microstructure_context.get("timing_bias") in {"Avoid Open", "Wait for Stabilization"}
+            else "Watch",
+            "score": microstructure_context.get("microstructure_score", 0.0),
+            "reason": microstructure_context.get("summary", ""),
+        },
     ]
     final = build_final_recommendation(
         symbol,
@@ -200,6 +222,15 @@ def run_any_ticker_research(symbol, profile=None, accuracy_context=None, market_
     if quality.get("recommendation_gate") == "Blocked":
         final["final_verdict"] = "Needs Data"
         final["paper_trade_eligible"] = False
+    reason_stack = build_reason_stack(
+        data_quality=quality,
+        lane=router.get("best_lane", "Needs Data"),
+        final_recommendation=final,
+        microstructure_context=microstructure_context,
+        risk=risk,
+        news_context=news_context,
+        fundamentals=fundamentals,
+    )
 
     return {
         "symbol": symbol,
@@ -210,6 +241,8 @@ def run_any_ticker_research(symbol, profile=None, accuracy_context=None, market_
         "regime": regime_data.get("regime", "Unknown"),
         "fundamentals": fundamentals,
         "data_quality": quality,
+        "data_source_manifest": data_source_manifest,
+        "microstructure_context": microstructure_context,
         "best_lane": "Needs Data" if quality.get("recommendation_gate") == "Blocked" else router.get("best_lane"),
         "best_holding_period": router.get("best_holding_period"),
         "entry_state": router.get("entry_state"),
@@ -222,6 +255,7 @@ def run_any_ticker_research(symbol, profile=None, accuracy_context=None, market_
             "Futures Proxy": router.get("futures_proxy_score"),
         },
         "evidence": router.get("why", []) + signal_data.get("reasons", [])[:2],
+        "reason_stack": reason_stack,
         "risks": quality.get("issues", []) + signal_data.get("risks", [])[:3] + fundamentals.get("risk_flags", [])[:2],
         "what_would_change_this": final.get("what_would_change_this", []),
         "watchlist_view": "Add to watchlist for research" if final.get("final_verdict") in {"Buy Candidate", "Add", "Watch", "Wait for Pullback"} else "Do not prioritize until data/evidence improves",

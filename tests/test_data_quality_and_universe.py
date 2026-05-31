@@ -14,6 +14,8 @@ def test_data_quality_flags_yfinance_as_high_confidence_when_timestamp_present()
         max_age_hours=10_000,
     )
     assert result["data_confidence"] == "High"
+    assert result["freshness_confidence"] == "High"
+    assert result["source_trust"] == "Warning"
     assert result["is_fallback"] is False
 
 

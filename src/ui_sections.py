@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 import streamlit as st
 
@@ -23,6 +24,12 @@ from trade_operations_engine import (
     build_trade_plan,
     evaluate_autopilot_safety,
     execute_paper_order_intent,
+)
+from market_microstructure_engine import build_microstructure_context
+from research_data_hub import (
+    SAVED_SCREEN_PRESETS,
+    filter_candidates_by_preset,
+    rank_discovery_candidates,
 )
 from evaluation_engine import evaluate_prediction
 from learning_engine import analyze_signal_effectiveness
@@ -1105,6 +1112,45 @@ def _display_best_opportunity_rows(rows):
     return table
 
 
+def _display_reason_stack(reason_stack):
+    return [
+        {
+            "category": row.get("category"),
+            "direction": row.get("direction"),
+            "strength": row.get("strength"),
+            "reason": row.get("reason"),
+            "source": row.get("source"),
+            "freshness": row.get("freshness", ""),
+            "what_would_change_this": row.get("what_would_change_this", ""),
+        }
+        for row in reason_stack or []
+    ]
+
+
+def _display_discovery_rows(rows):
+    table = []
+    for row in rows or []:
+        table.append(
+            {
+                "symbol": row.get("symbol"),
+                "lane": row.get("best_lane"),
+                "label": row.get("opportunity_label"),
+                "score": row.get("discovery_score"),
+                "long": row.get("long_term_score"),
+                "short_term": row.get("short_term_buy_score"),
+                "short_sale": row.get("short_sale_score"),
+                "return_%": row.get("return_pct"),
+                "volatility_%": row.get("volatility_pct"),
+                "drawdown_%": row.get("max_drawdown_pct"),
+                "source_trust": row.get("source_trust"),
+                "freshness": row.get("freshness_confidence"),
+                "allowed_use": row.get("allowed_use"),
+                "why": row.get("why_is_this_here"),
+            }
+        )
+    return table
+
+
 def render_best_opportunities_workstation(
     scan_rows,
     financial_profile=None,
@@ -1182,6 +1228,16 @@ def render_best_opportunities_workstation(
         p3.metric("Entry state", packet.get("entry_state", "Needs Data"))
         p4.metric("Data", packet.get("data_quality", {}).get("data_confidence", "Unknown"))
         st.write(packet.get("summary", "No packet summary available."))
+        micro = packet.get("microstructure_context", {})
+        if micro:
+            t1, t2, t3 = st.columns(3)
+            t1.metric("Session", micro.get("session_window", "Unknown"))
+            t2.metric("Timing bias", micro.get("timing_bias", "No Timing Edge"))
+            t3.metric("Timing score", micro.get("microstructure_score", 0.0))
+            st.caption(micro.get("summary", ""))
+        if packet.get("reason_stack"):
+            st.markdown("**Reason stack**")
+            st.dataframe(_display_reason_stack(packet.get("reason_stack")), width="stretch")
         st.markdown("**Lane scores**")
         st.dataframe(
             [{"lane": lane, "score": score} for lane, score in packet.get("lane_scores", {}).items()],
@@ -1269,6 +1325,7 @@ def render_opportunity_terminal(period, default_rows=None, financial_profile=Non
         symbols = get_opportunity_symbols(limit=scan_limit, scope="US_ADR", include_etfs=True, include_ipos=True)
         scanned = run_cross_asset_screen(symbols, period=period)
         st.session_state.opportunity_terminal_rows = _enrich_scan_rows_with_growth(scanned, universe)
+        st.session_state.research_context_last_scan_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     rows = st.session_state.opportunity_terminal_rows or _enrich_scan_rows_with_growth(default_rows or [], universe)
     index_rows = []
@@ -2460,6 +2517,326 @@ def render_strategy_scorecard(paper_performance, benchmark_data, paper_positions
     return scorecard
 
 
+def render_trade_desk(
+    selected_asset,
+    scan_rows,
+    snapshot,
+    price_data,
+    risk,
+    final_recommendation,
+    entry_exit_data,
+    position_size_data,
+    data_quality,
+    market_timing,
+    asset_class_context,
+    existing_position,
+    paper_performance,
+    paper_positions,
+    financial_profile=None,
+    accuracy_context=None,
+    current_prices=None,
+    period="1mo",
+    key_suffix="trade_desk",
+    research_context=None,
+):
+    """Render the simplified market-aware trade research cockpit."""
+    st.header("Trade Desk")
+    st.caption(
+        "One workflow for current-market context, agent research, trade plans, paper intents, and learning. "
+        "Research and paper trading only; live execution remains disabled."
+    )
+
+    financial_profile = financial_profile or {}
+    accuracy_context = accuracy_context or {}
+    current_prices = current_prices or {}
+    final_recommendation = final_recommendation or {}
+    research_context = research_context or {}
+    selected_asset = str(selected_asset or "").upper().strip()
+    microstructure_context = build_microstructure_context(
+        selected_asset,
+        snapshot=snapshot,
+        price_data=price_data,
+        data_quality=data_quality,
+    )
+    selected_agent_result = st.session_state.get(f"{key_suffix}_agent_result")
+    active_symbol = (selected_agent_result or {}).get("symbol", selected_asset)
+    active_final = final_recommendation
+    if selected_agent_result:
+        active_final = {
+            "final_verdict": selected_agent_result.get("final_verdict", "Watch"),
+            "confidence": selected_agent_result.get("confidence", "Low"),
+            "market_regime": selected_agent_result.get("market_regime", ""),
+            "time_horizon": selected_agent_result.get("lane", "Short Term"),
+            "score": selected_agent_result.get("score", 0.0),
+            "why": selected_agent_result.get("bull_case", []),
+            "vetoes": selected_agent_result.get("bear_case", []),
+            "what_would_change_this": selected_agent_result.get("judge_explanation", {}).get("what_would_change_this", []),
+        }
+    strategy_type = (selected_agent_result or {}).get("lane") or final_recommendation.get("time_horizon", "Short Term")
+    if strategy_type not in {"Short Term", "Long Term", "Futures Proxy", "Forex Research"}:
+        strategy_type = "Short Term"
+    plan_snapshot = snapshot if active_symbol == selected_asset else {
+        "symbol": active_symbol,
+        "price": (selected_agent_result or {}).get("price", 0.0),
+    }
+
+    trade_plan = build_trade_plan(
+        active_symbol,
+        plan_snapshot,
+        active_final,
+        entry_exit_data,
+        position_size_data,
+        risk,
+        data_quality if active_symbol == selected_asset else (selected_agent_result or {}).get("data_quality", data_quality),
+        market_timing=market_timing,
+        asset_class=(asset_class_context or {}).get("asset_class", "Equity"),
+        strategy_type=strategy_type,
+        existing_position=existing_position,
+        microstructure_context=(selected_agent_result or {}).get("microstructure_context", microstructure_context),
+    )
+    order_intent = build_order_intent(trade_plan, snapshot=plan_snapshot, existing_position=existing_position)
+
+    labels = {
+        "Buy Candidate": "Evidence supports paper-plan review now.",
+        "Wait for Pullback": "Thesis may be interesting, but timing or risk says wait.",
+        "Watch": "Not enough edge yet.",
+        "Needs Data": "Source or freshness blocks action.",
+        "Avoid": "Evidence or risk is unfavorable.",
+    }
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Verdict", trade_plan.get("final_verdict", "Watch"))
+    c2.metric("Status", trade_plan.get("status", "Draft"))
+    c3.metric("Timing", trade_plan.get("microstructure_context", {}).get("timing_bias", "No Timing Edge"))
+    c4.metric("Data", data_quality.get("data_confidence", "Unknown"))
+    st.info(labels.get(trade_plan.get("final_verdict", "Watch"), "Research-only verdict; human review required."))
+
+    context_candidates = research_context.get("discovery_rows") or rank_discovery_candidates(
+        scan_rows,
+        market_timing=market_timing,
+    )
+    active_candidate = next((row for row in context_candidates if row.get("symbol") == active_symbol), {})
+
+    desk_tabs = st.tabs(["Today", "Discover", "Research", "Plan", "Paper Autopilot", "Learning"])
+
+    with desk_tabs[0]:
+        st.subheader("Today")
+        t1, t2, t3, t4 = st.columns(4)
+        t1.metric("Session window", microstructure_context.get("session_window", "Unknown"))
+        t2.metric("Calendar", microstructure_context.get("day_of_week_context", "Unknown"))
+        t3.metric("Turn of month", "Active" if microstructure_context.get("turn_of_month_active") else "Inactive")
+        t4.metric("Scan", "Stale" if research_context.get("is_stale") else "Synced")
+        st.write(microstructure_context.get("summary", "No timing summary available."))
+        if research_context.get("stale_reason"):
+            st.warning(research_context.get("stale_reason"))
+        if microstructure_context.get("liquidity_warning"):
+            st.warning(microstructure_context.get("liquidity_warning"))
+
+        manifest = research_context.get("data_source_manifest", [])
+        if manifest:
+            st.markdown("**Data source manifest**")
+            st.dataframe(manifest[:18], width="stretch")
+        else:
+            source_rows = summarize_data_sources(
+                screened_assets=scan_rows,
+                selected_snapshot=snapshot,
+                selected_price_data=price_data,
+            )
+            st.caption(source_rows.get("summary", "No source summary available."))
+            if source_rows.get("rows"):
+                st.dataframe(source_rows.get("rows")[:12], width="stretch")
+
+        st.markdown("**Leaders / laggards from the shared scan**")
+        c_lead, c_lag = st.columns(2)
+        with c_lead:
+            st.dataframe(_display_discovery_rows(context_candidates[:8]), width="stretch")
+        with c_lag:
+            laggards = sorted(context_candidates, key=lambda row: row.get("return_pct", 0))[:8]
+            st.dataframe(_display_discovery_rows(laggards), width="stretch")
+
+    with desk_tabs[1]:
+        st.subheader("Discover")
+        col_preset, col_count = st.columns([2, 1])
+        preset = col_preset.selectbox(
+            "Saved screen",
+            list(SAVED_SCREEN_PRESETS.keys()),
+            key=f"{key_suffix}_saved_screen",
+        )
+        filtered = filter_candidates_by_preset(context_candidates, preset)
+        col_count.metric("Candidates", len(filtered))
+        st.caption(SAVED_SCREEN_PRESETS.get(preset, ""))
+        st.dataframe(_display_discovery_rows(filtered[:50]), width="stretch")
+        pick_options = [
+            f"{row.get('symbol')} | {row.get('best_lane')} | {row.get('opportunity_label')} | {row.get('discovery_score')}"
+            for row in filtered[:50]
+            if row.get("symbol")
+        ]
+        if pick_options:
+            selected_pick = st.selectbox("Open candidate in cockpit", pick_options, key=f"{key_suffix}_discover_pick")
+            selected_symbol = selected_pick.split(" | ")[0]
+            picked_row = next((row for row in filtered if row.get("symbol") == selected_symbol), {})
+            st.markdown("**Why is this here?**")
+            st.write(picked_row.get("why_is_this_here", "No explanation available."))
+            st.markdown("**What would remove it?**")
+            st.write(picked_row.get("what_removes_it", "No removal rule available."))
+            if picked_row.get("short_sale_research_only"):
+                st.warning("Short-sale lane is research-only. No margin, borrow, locate, or execution support is enabled.")
+            if st.button("Set Candidate As Selected", key=f"{key_suffix}_set_discovery_candidate"):
+                promote_symbol_to_selected(selected_symbol)
+                st.success(f"{selected_symbol} is now the global selected asset.")
+                st.rerun()
+        else:
+            st.info("No candidates match this saved screen yet.")
+
+    with desk_tabs[2]:
+        st.subheader("Research")
+        col_input, col_action = st.columns([3, 1])
+        ticker = col_input.text_input(
+            "Ticker",
+            value=active_symbol or selected_asset,
+            key=f"{key_suffix}_research_ticker",
+        ).upper().strip()
+        if col_action.button("Run Agent Research", key=f"{key_suffix}_run_agent"):
+            st.session_state[f"{key_suffix}_agent_result"] = run_agent_research_desk(
+                ticker,
+                run_type="Trade Desk",
+                profile=financial_profile,
+                save_memory=False,
+            )
+            st.rerun()
+
+        result = st.session_state.get(f"{key_suffix}_agent_result")
+        if result:
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric("Verdict", result.get("final_verdict", "Watch"))
+            r2.metric("Lane", result.get("lane", "Needs Data"))
+            r3.metric("Confidence", result.get("confidence", "Low"))
+            r4.metric("Score", f"{result.get('score', 0):.1f}")
+            st.write(result.get("summary", "No agent summary available."))
+            st.info(result.get("memory_delta", "No prior memory comparison."))
+
+            explanation = result.get("judge_explanation", {})
+            c_support, c_caution = st.columns(2)
+            with c_support:
+                st.markdown("**Why it could work**")
+                for item in explanation.get("top_supporting_reasons", []) or result.get("bull_case", [])[:3] or ["No strong bull case yet."]:
+                    st.success(f"- {item}")
+            with c_caution:
+                st.markdown("**Why to wait or avoid**")
+                for item in explanation.get("top_caution_reasons", []) or result.get("bear_case", [])[:3] or ["No major caution returned."]:
+                    st.warning(f"- {item}")
+            if result.get("reason_stack"):
+                st.markdown("**Reason stack**")
+                st.dataframe(_display_reason_stack(result.get("reason_stack")), width="stretch")
+            with st.expander("Agent vote table", expanded=False):
+                table = []
+                for row in result.get("agent_evidence", []):
+                    table.append(
+                        {
+                            "agent": row.get("agent_name"),
+                            "status": row.get("status"),
+                            "score": row.get("score"),
+                            "recommendation": row.get("recommendation"),
+                        }
+                    )
+                st.dataframe(table, width="stretch")
+        else:
+            st.write("Run agent research to create a market-aware packet for the selected ticker.")
+
+    with desk_tabs[3]:
+        st.subheader("Plan")
+        p1, p2, p3, p4 = st.columns(4)
+        p1.metric("Plan status", trade_plan.get("status", "Draft"))
+        p2.metric("Stop", f"${trade_plan.get('stop_loss', 0.0):,.2f}")
+        p3.metric("Target", f"${trade_plan.get('take_profit', 0.0):,.2f}")
+        p4.metric("Next review", trade_plan.get("next_review_time", "N/A"))
+        st.write(f"Entry: {trade_plan.get('entry_trigger', 'N/A')}")
+        st.write(f"Preferred entry window: {trade_plan.get('preferred_entry_window', 'N/A')}")
+        st.write(f"Preferred sell/trim window: {trade_plan.get('preferred_exit_window', 'N/A')}")
+        st.write(f"Max holding window: {trade_plan.get('max_holding_window', 'N/A')}")
+        if active_candidate.get("best_lane") == "Short-Sale Research":
+            st.markdown("**Short-sale research lane**")
+            st.warning(
+                "This is a separate research-only lane. It does not create short orders, margin use, borrow assumptions, or live execution."
+            )
+            st.write(active_candidate.get("why_is_this_here", "No short-sale explanation available."))
+        c_sell, c_change = st.columns(2)
+        with c_sell:
+            st.markdown("**Sell / trim reasons**")
+            for item in trade_plan.get("sell_triggers", [])[:8]:
+                st.warning(f"- {item}")
+        with c_change:
+            st.markdown("**Invalidation**")
+            for item in trade_plan.get("invalidation_triggers", [])[:8]:
+                st.info(f"- {item}")
+        st.markdown("**Reason stack**")
+        st.dataframe(_display_reason_stack(trade_plan.get("reason_stack")), width="stretch")
+
+    with desk_tabs[4]:
+        st.subheader("Paper Autopilot")
+        controls = {}
+        c1, c2, c3 = st.columns(3)
+        controls["max_daily_loss_pct"] = c1.number_input("Daily max loss %", min_value=0.1, value=2.0, step=0.1, key=f"{key_suffix}_daily_loss")
+        controls["max_weekly_loss_pct"] = c2.number_input("Weekly max loss %", min_value=0.1, value=5.0, step=0.1, key=f"{key_suffix}_weekly_loss")
+        controls["max_trades_per_day"] = c3.number_input("Max trades/day", min_value=1, value=3, step=1, key=f"{key_suffix}_max_trades")
+        c4, c5, c6 = st.columns(3)
+        controls["max_total_exposure_pct"] = c4.number_input("Max exposure %", min_value=1.0, value=25.0, step=1.0, key=f"{key_suffix}_max_exposure")
+        controls["portfolio_value"] = c5.number_input("Paper portfolio value", min_value=1000.0, value=100000.0, step=1000.0, key=f"{key_suffix}_portfolio_value")
+        controls["kill_switch"] = c6.checkbox("Emergency kill switch", value=False, key=f"{key_suffix}_kill_switch")
+        controls["current_exposure_pct"] = 0.0
+        if controls["portfolio_value"] > 0:
+            controls["current_exposure_pct"] = (
+                float((paper_positions or {}).get("market_value", 0.0)) / controls["portfolio_value"] * 100
+            )
+        safety = evaluate_autopilot_safety(
+            order_intent,
+            paper_performance=paper_performance,
+            paper_positions=paper_positions,
+            controls=controls,
+        )
+        o1, o2, o3, o4 = st.columns(4)
+        o1.metric("Intent", order_intent.get("intent_type", "none"))
+        o2.metric("Quantity", order_intent.get("quantity", 0.0))
+        o3.metric("Limit", f"${order_intent.get('limit_price', 0.0):,.2f}")
+        o4.metric("Safety", "Pass" if safety.get("allowed") else "Blocked")
+        for item in safety.get("failed", []):
+            st.warning(f"- {item}")
+        if st.button("Execute Paper Order Intent", key=f"{key_suffix}_execute_paper"):
+            result = execute_paper_order_intent(order_intent, safety)
+            if result.get("saved"):
+                st.success(result.get("message", "Paper order saved."))
+                st.write(result.get("trade", {}))
+            else:
+                st.info(result.get("message", "No paper order saved."))
+
+    with desk_tabs[5]:
+        st.subheader("Learning")
+        evaluation = evaluate_agent_research_memory(
+            agent_runs=load_agent_runs(limit=250),
+            evidence_rows=load_agent_evidence(limit=1000),
+            recommendation_log=load_recommendation_log(),
+        )
+        l1, l2, l3 = st.columns(3)
+        l1.metric("Agent runs", evaluation.get("total_agent_runs", 0))
+        l2.metric("Evaluated", evaluation.get("evaluated_recommendations", 0))
+        l3.metric("Confidence adjustment", evaluation.get("confidence_adjustment", 0.0))
+        st.write(evaluation.get("summary", "No learning summary available."))
+        if evaluation.get("lane_stats"):
+            st.markdown("**By lane**")
+            st.dataframe(evaluation.get("lane_stats"), width="stretch")
+        if evaluation.get("agent_activity"):
+            st.markdown("**By agent**")
+            st.dataframe(evaluation.get("agent_activity"), width="stretch")
+
+    return {
+        "microstructure_context": microstructure_context,
+        "trade_plan": trade_plan,
+        "order_intent": order_intent,
+        "agent_result": selected_agent_result,
+        "research_context": research_context,
+    }
+
+
 def render_trade_operations_cockpit(
     symbol,
     snapshot,
@@ -2552,10 +2929,17 @@ def render_trade_operations_cockpit(
     p4.metric("Target", f"${trade_plan.get('take_profit', 0.0):,.2f}")
     st.write(trade_plan.get("summary", "No trade plan summary."))
     st.write(f"Entry trigger: {trade_plan.get('entry_trigger', 'N/A')}")
+    st.write(f"Preferred entry window: {trade_plan.get('preferred_entry_window', 'N/A')}")
+    st.write(f"Preferred exit window: {trade_plan.get('preferred_exit_window', 'N/A')}")
     st.write(f"Max holding window: {trade_plan.get('max_holding_window', 'N/A')}")
     st.write(f"Next review: {trade_plan.get('next_review_time', 'N/A')}")
     if trade_plan.get("long_term_action"):
         st.write(f"Long-term action: {trade_plan.get('long_term_action')}")
+    if trade_plan.get("liquidity_warning"):
+        st.warning(trade_plan.get("liquidity_warning"))
+    if trade_plan.get("reason_stack"):
+        with st.expander("Reason Stack", expanded=False):
+            st.dataframe(_display_reason_stack(trade_plan.get("reason_stack")), width="stretch")
 
     c_exit, c_trim = st.columns(2)
     with c_exit:
@@ -4150,6 +4534,32 @@ def render_agent_research_desk(
         c4.metric("Data", result.get("data_quality", {}).get("data_confidence", "Unknown"))
         st.write(result.get("summary", "No agent summary available."))
         st.info(result.get("memory_delta", "No memory comparison available."))
+        micro = result.get("microstructure_context", {})
+        if micro:
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Session", micro.get("session_window", "Unknown"))
+            m2.metric("Timing bias", micro.get("timing_bias", "No Timing Edge"))
+            m3.metric("Timing score", micro.get("microstructure_score", 0.0))
+            st.caption(micro.get("summary", ""))
+        explanation = result.get("judge_explanation", {})
+        if explanation:
+            with st.expander("Judge Explanation", expanded=True):
+                st.write(explanation.get("data_gate", ""))
+                st.write(f"Best lane: {explanation.get('best_lane', 'Needs Data')}")
+                c_support, c_caution = st.columns(2)
+                with c_support:
+                    st.markdown("**Top supporting reasons**")
+                    for item in explanation.get("top_supporting_reasons", []) or ["No strong supporting reason yet."]:
+                        st.success(f"- {item}")
+                with c_caution:
+                    st.markdown("**Top cautions / blockers**")
+                    for item in explanation.get("top_caution_reasons", []) or ["No major caution returned."]:
+                        st.warning(f"- {item}")
+                st.write(f"Entry timing: {explanation.get('entry_timing', 'Follow the trade plan.')}")
+                st.write(f"Sell/trim timing: {explanation.get('sell_trim_timing', 'Use named triggers.')}")
+        if result.get("reason_stack"):
+            with st.expander("Reason Stack", expanded=False):
+                st.dataframe(_display_reason_stack(result.get("reason_stack")), width="stretch")
         if st.button("Set Agent Result As Selected Asset", key=f"set_agent_result_{key_suffix}"):
             promote_symbol_to_selected(result.get("symbol"))
             st.success(f"{result.get('symbol')} is now the global selected asset.")

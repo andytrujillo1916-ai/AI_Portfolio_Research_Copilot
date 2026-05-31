@@ -52,6 +52,7 @@ from db_service import load_financial_profile, load_real_holdings
 from growth_discovery_engine import score_growth_discovery
 from market_timing_engine import build_market_timing_context
 from paper_autopilot import run_daily_paper_autopilot
+from research_data_hub import build_research_data_context
 from research_state import build_research_universe, promote_symbol_to_selected
 from ui_sections import (
     render_asset_comparison,
@@ -146,6 +147,7 @@ from ui_sections import (
     render_recommendation_logger,
     render_explainability_panel,
     render_timing_explanation,
+    render_trade_desk,
     render_trade_operations_cockpit,
     render_position_sizing_modes,
     render_etf_benchmark_dashboard,
@@ -651,16 +653,30 @@ quant_decision_exec = build_quant_decision_intelligence(
 snapshot_quality_exec = evaluate_data_quality(snapshot)
 price_quality_exec = evaluate_data_quality(price_data)
 selected_data_quality_exec = {
+    "source": price_quality_exec.get("source", snapshot_quality_exec.get("source", "unknown")),
+    "provider": price_quality_exec.get("provider", snapshot_quality_exec.get("provider", "unknown")),
+    "source_trust": price_quality_exec.get("source_trust", snapshot_quality_exec.get("source_trust", "Warning")),
     "data_confidence": "Low"
     if "Low" in {snapshot_quality_exec.get("data_confidence"), price_quality_exec.get("data_confidence")}
     else "Medium"
     if "Medium" in {snapshot_quality_exec.get("data_confidence"), price_quality_exec.get("data_confidence")}
+    else "High",
+    "freshness_confidence": "Low"
+    if "Low" in {snapshot_quality_exec.get("freshness_confidence"), price_quality_exec.get("freshness_confidence")}
+    else "Medium"
+    if "Medium" in {snapshot_quality_exec.get("freshness_confidence"), price_quality_exec.get("freshness_confidence")}
     else "High",
     "recommendation_gate": "Blocked"
     if "Blocked" in {snapshot_quality_exec.get("recommendation_gate"), price_quality_exec.get("recommendation_gate")}
     else "Warning"
     if "Warning" in {snapshot_quality_exec.get("recommendation_gate"), price_quality_exec.get("recommendation_gate")}
     else "Trusted",
+    "allowed_use": "display_only"
+    if "Blocked" in {snapshot_quality_exec.get("recommendation_gate"), price_quality_exec.get("recommendation_gate")}
+    else "research_and_recommendation"
+    if "Trusted" == price_quality_exec.get("recommendation_gate") == snapshot_quality_exec.get("recommendation_gate")
+    else "research_only",
+    "last_timestamp": price_quality_exec.get("last_timestamp") or snapshot_quality_exec.get("last_timestamp"),
     "status": price_quality_exec.get("status", snapshot_quality_exec.get("status", "Unknown")),
     "summary": " | ".join(snapshot_quality_exec.get("issues", []) + price_quality_exec.get("issues", [])),
 }
@@ -688,12 +704,40 @@ market_timing_exec = build_market_timing_context(
     macro_context,
     stored_financial_profile_exec,
 )
-st.session_state.research_universe = build_research_universe(
+real_holdings_for_context = load_real_holdings()
+manual_symbols_for_context = [
+    symbol
+    for symbol in {custom_ticker, st.session_state.get("custom_research_symbol", "")}
+    if symbol
+]
+research_context = build_research_data_context(
+    selected_asset,
+    period,
+    watchlist=watchlist,
+    dynamic_rows=opportunity_scan_rows_exec,
+    best_opportunity_rows=best_opportunity_rows_exec,
+    paper_positions=paper_positions,
+    real_holdings=real_holdings_for_context,
+    agent_queue=st.session_state.get("agents_tab_queue", []) + st.session_state.get("trade_desk_queue", []),
+    manual_symbols=manual_symbols_for_context,
+    snapshot=snapshot,
+    price_data=price_data,
+    market_timing=market_timing_exec,
+    previous_signature=st.session_state.get("research_context_signature", ""),
+    previous_period=st.session_state.get("research_context_period", ""),
+    last_scan_at=st.session_state.get("research_context_last_scan_at", ""),
+)
+st.session_state.research_context_signature = research_context.get("signature", "")
+st.session_state.research_context_period = period
+st.session_state.research_context = research_context
+st.session_state.research_universe = research_context.get("universe_symbols", []) or build_research_universe(
     watchlist,
     opportunity_scan_rows_exec + best_opportunity_rows_exec,
     paper_positions,
     selected_asset,
 )
+opportunity_scan_rows_exec = research_context.get("candidate_rows", opportunity_scan_rows_exec)
+autopilot_candidate_rows_exec = research_context.get("discovery_rows", autopilot_candidate_rows_exec)
 
 today_key = datetime.now().strftime("%Y-%m-%d")
 if st.session_state.paper_autopilot_last_run_date != today_key:
@@ -711,47 +755,42 @@ if st.session_state.paper_autopilot_last_run_date != today_key:
     )
     st.session_state.paper_autopilot_last_run_date = today_key
 
-(
-    tab_buy_finder,
-    tab_opportunity,
-    tab_executive,
-    tab_decision,
-    tab_timing,
-    tab_portfolio,
-    tab_etf,
-    tab_accuracy,
-    tab_strategy,
-    tab_journal,
-    tab_agents,
-    tab_health,
-) = st.tabs(
-    [
-        "Buy Finder",
-        "Opportunity Terminal",
-        "Executive Dashboard",
-        "Decision Breakdown",
-        "Timing & Position Sizing",
-        "Portfolio Lab",
-        "ETF Benchmark",
-        "Prediction Accuracy",
-        "Strategy Lab",
-        "Journal",
-        "Agent Research Desk",
-        "System Health",
-    ]
+tab_trade_desk, tab_advanced_lab, tab_journal, tab_health = st.tabs(
+    ["Trade Desk", "Advanced Lab", "Journal", "System Health"]
 )
 
-with tab_buy_finder:
-    opportunity_terminal_context = render_opportunity_terminal(
-        period,
-        default_rows=screened_assets,
-        financial_profile=stored_financial_profile_exec,
-        sector_context=sector_context,
-        macro_context=macro_context,
-        key_suffix="buy_finder_opportunity",
+with tab_advanced_lab:
+    (
+        tab_buy_finder,
+        tab_opportunity,
+        tab_executive,
+        tab_decision,
+        tab_timing,
+        tab_portfolio,
+        tab_etf,
+        tab_accuracy,
+        tab_strategy,
+        tab_agents,
+    ) = st.tabs(
+        [
+            "Buy Finder",
+            "Opportunity",
+            "Executive",
+            "Decision",
+            "Timing",
+            "Portfolio",
+            "ETF",
+            "Accuracy",
+            "Strategy",
+            "Agents",
+        ]
     )
-    buy_finder_rows = opportunity_terminal_context.get("rows", opportunity_scan_rows_exec)
-    buy_finder_timing = opportunity_terminal_context.get("market_timing", market_timing_exec)
+
+with tab_buy_finder:
+    buy_finder_rows = research_context.get("candidate_rows", opportunity_scan_rows_exec)
+    buy_finder_timing = research_context.get("market_timing", market_timing_exec)
+    if research_context.get("stale_reason"):
+        st.warning(research_context.get("stale_reason"))
     render_buy_finder_terminal(
         buy_finder_rows,
         buy_finder_timing,
@@ -759,6 +798,42 @@ with tab_buy_finder:
         load_real_holdings(),
         accuracy_context=prediction_summary_exec,
         key_suffix="buy_finder_tab",
+    )
+
+with tab_trade_desk:
+    selected_existing_position_exec = paper_positions.get("positions", {}).get(selected_asset, {})
+    trade_desk_initial_verdict = meta_decision_exec.get("final_verdict", "Watch")
+    if trade_desk_initial_verdict in {"Strong Research Candidate", "Research Candidate", "Agent Research"}:
+        trade_desk_initial_verdict = "Watch"
+    render_trade_desk(
+        selected_asset,
+        opportunity_scan_rows_exec,
+        snapshot,
+        price_data,
+        risk,
+        {
+            "final_verdict": trade_desk_initial_verdict,
+            "confidence": meta_decision_exec.get("confidence", "Low"),
+            "market_regime": regime_data.get("regime", ""),
+            "time_horizon": meta_decision_exec.get("time_horizon", "Short Term"),
+            "score": meta_decision_exec.get("decision_score", signal_data.get("score", 50)),
+            "why": meta_decision_exec.get("reasons", []),
+            "vetoes": meta_decision_exec.get("vetoes", []),
+        },
+        entry_exit_exec,
+        position_size_exec,
+        selected_data_quality_exec,
+        market_timing_exec,
+        asset_class_context,
+        selected_existing_position_exec,
+        paper_performance,
+        paper_positions,
+        financial_profile=stored_financial_profile_exec,
+        accuracy_context=prediction_summary_exec,
+        current_prices=current_prices_by_symbol,
+        period=period,
+        key_suffix="trade_desk",
+        research_context=research_context,
     )
 
 with tab_opportunity:
@@ -957,16 +1032,10 @@ with tab_portfolio:
     # 4) Benchmark truth 5) Strategy lab context
     financial_profile = render_financial_profile_form()
     real_holdings = render_real_portfolio_editor()
-    opportunity_terminal_context = render_opportunity_terminal(
-        period,
-        default_rows=screened_assets,
-        financial_profile=financial_profile,
-        sector_context=sector_context,
-        macro_context=macro_context,
-        key_suffix="portfolio",
-    )
-    opportunity_scan_rows = opportunity_terminal_context.get("rows", screened_assets)
-    market_timing_context = opportunity_terminal_context.get("market_timing", market_timing_exec)
+    opportunity_scan_rows = research_context.get("candidate_rows", opportunity_scan_rows_exec)
+    market_timing_context = research_context.get("market_timing", market_timing_exec)
+    if research_context.get("stale_reason"):
+        st.warning(research_context.get("stale_reason"))
     buy_finder_context = render_buy_finder_terminal(
         opportunity_scan_rows,
         market_timing_context,
@@ -1217,7 +1286,7 @@ with tab_agents:
     render_autopilot_today(st.session_state.get("paper_autopilot_today"))
     render_agent_research_desk(
         selected_asset,
-        screened_assets,
+        research_context.get("candidate_rows", screened_assets),
         financial_profile=stored_financial_profile_exec,
         current_prices=current_prices_by_symbol,
         key_suffix="agents_tab",

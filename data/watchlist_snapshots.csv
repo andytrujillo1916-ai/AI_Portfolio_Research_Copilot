@@ -1,37 +1,37 @@
 timestamp,symbol,score,volatility_pct,max_drawdown_pct,regime,news_sentiment,opportunity_priority,mapped_sector
-2026-05-30 15:42:33,AAPL,85.0,17.35,-1.18,Bull Trend,Neutral,High,Technology
-2026-05-30 15:42:33,QQQ,83.0,16.1,-2.54,Bull Trend,Bullish,High,Broad Market / Tech Tilt
-2026-05-30 15:42:33,SPY,81.0,9.76,-1.93,Bull Trend,Bullish,High,Broad Market / Tech Tilt
-2026-05-30 15:42:33,VOO,79.0,9.73,-1.91,Bull Trend,Bullish,High,Broad Market / Tech Tilt
-2026-05-30 15:42:33,DIA,79.0,10.59,-1.43,Bull Trend,Bullish,High,Unknown
-2026-05-30 15:42:33,MSFT,77.0,28.39,-3.7,Bull Trend,Neutral,High,Technology
-2026-05-30 15:42:33,GS,77.0,28.05,-4.15,Bull Trend,Bullish,High,Unknown
-2026-05-30 15:42:33,XLV,74.0,13.44,-2.02,Sideways / Range,Bullish,High,Healthcare
-2026-05-30 15:42:33,SMH,73.0,40.06,-5.94,High Volatility,Bullish,High,Unknown
-2026-05-30 15:42:33,MRK,72.0,28.29,-3.01,Sideways / Range,Bullish,High,Unknown
-2026-05-30 15:42:33,IWM,71.0,19.47,-4.81,Bull Trend,Neutral,High,Unknown
-2026-05-30 15:42:33,XLF,68.0,11.24,-2.19,Sideways / Range,Neutral,Medium,Unknown
-2026-05-30 15:42:33,PFE,68.0,12.92,-3.57,Sideways / Range,Neutral,Medium,Unknown
-2026-05-30 15:42:33,KO,65.0,14.7,-3.55,Sideways / Range,Neutral,Medium,Unknown
-2026-05-30 15:42:33,SOXX,65.0,48.21,-6.92,High Volatility,Bearish,Medium,Unknown
-2026-05-30 15:42:33,AMD,63.0,93.43,-9.75,High Volatility,Bearish,Medium,Unknown
-2026-05-30 15:42:33,CRM,63.0,48.08,-11.31,High Volatility,Bullish,Medium,Unknown
-2026-05-30 15:42:33,UNH,63.0,24.58,-6.06,Sideways / Range,Neutral,Medium,Unknown
-2026-05-30 15:42:33,META,62.0,20.06,-2.91,Bull Trend,Neutral,Medium,Unknown
-2026-05-30 15:42:33,JNJ,62.0,19.28,-3.71,Bear Trend,Neutral,Medium,Unknown
-2026-05-30 15:42:33,TSLA,61.0,38.95,-9.24,High Volatility,Neutral,Medium,Unknown
-2026-05-30 15:42:33,AMZN,60.0,21.32,-5.69,Bull Trend,Neutral,Medium,Unknown
-2026-05-30 15:42:33,BAC,58.0,22.02,-7.15,Bear Trend,Neutral,Medium,Unknown
-2026-05-30 15:42:33,LLY,58.0,31.03,-4.09,Bull Trend,Bearish,Medium,Unknown
-2026-05-30 15:42:33,JPM,57.0,22.25,-6.1,Bear Trend,Neutral,Medium,Unknown
-2026-05-30 15:42:33,AVGO,55.0,39.36,-6.53,High Volatility,Bearish,Medium,Unknown
-2026-05-30 15:42:33,CVX,55.0,28.35,-7.53,Bear Trend,Neutral,Medium,Unknown
-2026-05-30 15:42:33,GOOGL,54.0,25.99,-5.53,Bear Trend,Neutral,Medium,Unknown
-2026-05-30 15:42:33,NFLX,53.0,23.71,-8.72,Bear Trend,Neutral,Medium,Unknown
-2026-05-30 15:42:33,PG,52.0,22.31,-4.46,Bear Trend,Neutral,Medium,Unknown
-2026-05-30 15:42:33,PEP,48.0,21.99,-9.02,Bear Trend,Neutral,Low,Unknown
-2026-05-30 15:42:33,NVDA,45.0,36.75,-10.44,High Volatility,Neutral,Low,Technology
-2026-05-30 15:42:33,COST,45.0,27.79,-12.61,Bear Trend,Bullish,Low,Unknown
-2026-05-30 15:42:33,XLE,45.0,27.99,-8.16,Bear Trend,Bearish,Low,Energy
-2026-05-30 15:42:33,XOM,27.0,33.58,-10.64,Bear Trend,Bearish,Low,Unknown
-2026-05-30 15:42:33,WMT,23.0,31.86,-13.75,Bear Trend,Neutral,Low,Unknown
+2026-05-31 15:00:54,AAPL,90.0,17.35,-1.18,Bull Trend,Bullish,High,Technology
+2026-05-31 15:00:54,QQQ,83.0,16.1,-2.54,Bull Trend,Bullish,High,Broad Market / Tech Tilt
+2026-05-31 15:00:54,MSFT,82.0,28.39,-3.7,Bull Trend,Bullish,High,Technology
+2026-05-31 15:00:54,SPY,81.0,9.76,-1.93,Bull Trend,Bullish,High,Broad Market / Tech Tilt
+2026-05-31 15:00:54,VOO,79.0,9.73,-1.91,Bull Trend,Bullish,High,Broad Market / Tech Tilt
+2026-05-31 15:00:54,DIA,79.0,10.59,-1.43,Bull Trend,Bullish,High,Unknown
+2026-05-31 15:00:54,XLV,74.0,13.44,-2.02,Sideways / Range,Bullish,High,Healthcare
+2026-05-31 15:00:54,SMH,73.0,40.06,-5.94,High Volatility,Bullish,High,Unknown
+2026-05-31 15:00:54,GS,72.0,28.05,-4.15,Bull Trend,Neutral,High,Unknown
+2026-05-31 15:00:54,MRK,72.0,28.29,-3.01,Sideways / Range,Bullish,High,Unknown
+2026-05-31 15:00:54,IWM,71.0,19.47,-4.81,Bull Trend,Neutral,High,Unknown
+2026-05-31 15:00:54,AMD,71.0,93.43,-9.75,High Volatility,Neutral,High,Unknown
+2026-05-31 15:00:54,XLF,68.0,11.24,-2.19,Sideways / Range,Neutral,Medium,Unknown
+2026-05-31 15:00:54,PFE,68.0,12.92,-3.57,Sideways / Range,Neutral,Medium,Unknown
+2026-05-31 15:00:54,BAC,67.0,22.02,-7.15,Bear Trend,Bullish,Medium,Unknown
+2026-05-31 15:00:54,AVGO,65.0,39.36,-6.53,High Volatility,Neutral,Medium,Unknown
+2026-05-31 15:00:54,SOXX,65.0,48.21,-6.92,High Volatility,Bearish,Medium,Unknown
+2026-05-31 15:00:54,JNJ,64.0,19.28,-3.71,Bear Trend,Neutral,Medium,Unknown
+2026-05-31 15:00:54,UNH,63.0,24.58,-6.06,Sideways / Range,Neutral,Medium,Unknown
+2026-05-31 15:00:54,LLY,63.0,31.03,-4.09,Bull Trend,Neutral,Medium,Unknown
+2026-05-31 15:00:54,META,62.0,20.06,-2.91,Bull Trend,Neutral,Medium,Unknown
+2026-05-31 15:00:54,TSLA,61.0,38.95,-9.24,High Volatility,Neutral,Medium,Unknown
+2026-05-31 15:00:54,KO,60.0,14.7,-3.55,Sideways / Range,Bearish,Medium,Unknown
+2026-05-31 15:00:54,AMZN,58.0,21.32,-5.69,Bull Trend,Neutral,Medium,Unknown
+2026-05-31 15:00:54,CRM,56.0,48.08,-11.31,High Volatility,Neutral,Medium,Unknown
+2026-05-31 15:00:54,GOOGL,54.0,25.99,-5.53,Bear Trend,Neutral,Medium,Unknown
+2026-05-31 15:00:54,NFLX,53.0,23.71,-8.72,Bear Trend,Neutral,Medium,Unknown
+2026-05-31 15:00:54,CVX,53.0,28.35,-7.53,Bear Trend,Neutral,Medium,Unknown
+2026-05-31 15:00:54,PG,52.0,22.31,-4.46,Bear Trend,Neutral,Medium,Unknown
+2026-05-31 15:00:54,JPM,50.0,22.25,-6.1,Bear Trend,Bearish,Medium,Unknown
+2026-05-31 15:00:54,PEP,46.0,21.99,-9.02,Bear Trend,Neutral,Low,Unknown
+2026-05-31 15:00:54,XLE,45.0,27.99,-8.16,Bear Trend,Bearish,Low,Energy
+2026-05-31 15:00:54,NVDA,43.0,36.75,-10.44,High Volatility,Neutral,Low,Technology
+2026-05-31 15:00:54,COST,42.0,27.79,-12.61,Bear Trend,Neutral,Low,Unknown
+2026-05-31 15:00:54,XOM,34.0,33.58,-10.64,Bear Trend,Neutral,Low,Unknown
+2026-05-31 15:00:54,WMT,25.0,31.86,-13.75,Bear Trend,Neutral,Low,Unknown

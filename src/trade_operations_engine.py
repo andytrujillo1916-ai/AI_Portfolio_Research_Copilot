@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 
+from market_microstructure_engine import build_microstructure_context, build_reason_stack
 from paper_trader import add_paper_trade, load_paper_trades
+from research_data_hub import build_source_manifest_item
 
 
 FREE_RESEARCH_SOURCES = {"yfinance", "sec_edgar", "manual", "local_universe"}
@@ -19,8 +21,14 @@ def _today():
     return datetime.now().strftime("%Y-%m-%d")
 
 
-def _next_review(strategy_type):
-    hours = 4 if strategy_type == "Short Term" else 24 if strategy_type == "Futures Proxy" else 72
+def _next_review(strategy_type, microstructure_context=None):
+    microstructure_context = microstructure_context or {}
+    if microstructure_context.get("day_of_week_context") == "Friday weekend-risk review" and strategy_type == "Short Term":
+        hours = 2
+    elif microstructure_context.get("timing_bias") in {"Avoid Open", "Wait for Stabilization"} and strategy_type == "Short Term":
+        hours = 1
+    else:
+        hours = 4 if strategy_type == "Short Term" else 24 if strategy_type == "Futures Proxy" else 72
     return (datetime.now() + timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M")
 
 
@@ -114,6 +122,7 @@ def build_trade_plan(
     strategy_type="Short Term",
     existing_position=None,
     benchmark_symbol="SPY",
+    microstructure_context=None,
 ):
     """Build the central audited trade plan object used before any order intent."""
     symbol = str(symbol or "").upper()
@@ -125,6 +134,11 @@ def build_trade_plan(
     data_quality = data_quality or {}
     market_timing = market_timing or {}
     existing_position = existing_position or {}
+    microstructure_context = microstructure_context or build_microstructure_context(
+        symbol,
+        snapshot=snapshot,
+        data_quality=data_quality,
+    )
 
     price = _safe_float(snapshot.get("price"))
     stop_pct = _safe_float(entry_exit_data.get("stop_loss_guidance_pct"), 6.0)
@@ -146,6 +160,8 @@ def build_trade_plan(
         "Market-risk downgrade: market risk moves to High/Stress.",
         "Better alternative: benchmark or ranked opportunity materially improves versus this setup.",
     ]
+    if microstructure_context.get("sell_timing_reason"):
+        sell_triggers.append(f"Timing review: {microstructure_context.get('sell_timing_reason')}")
     trim_rules = [
         "Trim 50% at first target or if conviction weakens while still profitable.",
         "Trim instead of add when exposure or diversification gates weaken.",
@@ -163,9 +179,13 @@ def build_trade_plan(
     else:
         max_holding_window = "10 trading days for short-term paper trade before mandatory review."
         entry_trigger = entry_exit_data.get("entry_zone", "No-Trade Zone")
+        if microstructure_context.get("day_of_week_context") == "Friday weekend-risk review":
+            max_holding_window = "Review before Friday close or within 5 trading days, whichever comes first."
 
     status = "Draft"
     if data_gate == "Blocked" or data_confidence == "Low":
+        status = "Needs Data"
+    elif not microstructure_context.get("paper_trade_allowed", True):
         status = "Needs Data"
     elif market_risk == "High" and final_verdict in {"Buy Candidate", "Add"}:
         status = "Wait for Pullback"
@@ -173,10 +193,12 @@ def build_trade_plan(
         status = "Approved for Paper"
     elif final_verdict in {"Trim", "Sell Candidate"} and has_position:
         status = "Approved for Paper Exit"
-    elif final_verdict in {"Watch", "Hold", "Wait for Pullback"}:
+    elif final_verdict == "Wait for Pullback":
+        status = "Wait for Pullback"
+    elif final_verdict in {"Watch", "Hold"}:
         status = "Watch"
 
-    return {
+    plan = {
         "symbol": symbol,
         "asset_class": asset_class,
         "strategy_type": strategy_type,
@@ -189,7 +211,7 @@ def build_trade_plan(
         "trim_rules": trim_rules,
         "time_stop": max_holding_window,
         "max_holding_window": max_holding_window,
-        "next_review_time": _next_review(strategy_type),
+        "next_review_time": _next_review(strategy_type, microstructure_context),
         "max_position_size": position_size_data.get("recommended_position_pct", 0.0),
         "risk_budget": position_size_data.get("risk_budget", "No new risk until reviewed."),
         "confidence": final_recommendation.get("confidence", "Low"),
@@ -199,12 +221,31 @@ def build_trade_plan(
         "final_verdict": final_verdict,
         "long_term_action": _long_term_action(final_verdict, strategy_type, data_quality),
         "invalidation_triggers": invalidation,
+        "preferred_entry_window": microstructure_context.get("preferred_entry_window", "Follow the trade plan."),
+        "preferred_exit_window": microstructure_context.get("preferred_exit_window", "Use named exit triggers."),
+        "microstructure_score": microstructure_context.get("microstructure_score", 0.0),
+        "calendar_context": microstructure_context.get("calendar_context", []),
+        "liquidity_warning": microstructure_context.get("liquidity_warning", ""),
+        "sell_timing_reason": microstructure_context.get("sell_timing_reason", ""),
+        "microstructure_context": microstructure_context,
+        "data_source_manifest": [
+            build_source_manifest_item(symbol, "trade_plan", {"source": data_quality.get("source", "unknown")}, data_quality)
+        ],
         "status": status,
         "benchmark_symbol": benchmark_symbol,
         "human_review_required": True,
         "live_trading_enabled": False,
         "summary": f"{symbol} trade plan is {status}. Live trading remains disabled.",
     }
+    plan["reason_stack"] = build_reason_stack(
+        data_quality=data_quality,
+        lane=strategy_type,
+        final_recommendation=final_recommendation,
+        microstructure_context=microstructure_context,
+        risk=risk,
+        trade_plan=plan,
+    )
+    return plan
 
 
 def build_order_intent(trade_plan, snapshot=None, existing_position=None, live_requested=False):
@@ -237,6 +278,8 @@ def build_order_intent(trade_plan, snapshot=None, existing_position=None, live_r
                 "Live candidate requires broker/paid realtime quote data and explicit user approval.",
             ]
         )
+    if trade_plan.get("liquidity_warning") and intent_type in {"live_candidate", "paper_buy"}:
+        live_blockers.append(trade_plan.get("liquidity_warning"))
 
     return {
         "intent_type": intent_type,
