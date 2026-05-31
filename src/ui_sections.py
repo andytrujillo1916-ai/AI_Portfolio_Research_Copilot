@@ -149,6 +149,8 @@ from agent_research_desk import (
 from best_opportunities_engine import rank_best_opportunities, run_any_ticker_research
 from research_packet_exporter import build_research_packet_markdown
 from market_stress_engine import analyze_market_stress
+from paper_autopilot import build_paper_trade_checklist_markdown
+from research_state import promote_symbol_to_selected
 
 
 def render_market_snapshot(snapshot, shares):
@@ -335,6 +337,66 @@ def render_market_stress_research(period="3mo"):
     st.write(stress.get("interpretation", "No stress interpretation available."))
     st.caption(stress.get("disclaimer", "Research-only market stress context."))
     return stress
+
+
+def render_autopilot_today(autopilot_result):
+    """Render today's simulated paper-autopilot activity."""
+    st.header("Autopilot Today")
+    st.caption(
+        "Daily agent autopilot saves simulated paper trades only. No broker APIs, live orders, margin, leverage, or direct futures contracts."
+    )
+    result = autopilot_result or {}
+    if not result:
+        st.info("No autopilot run has been recorded for this session yet.")
+        return {}
+
+    saved = result.get("saved_trades", [])
+    skipped = result.get("skipped_candidates", [])
+    evaluated = result.get("evaluated_candidates", [])
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Date", result.get("date", "N/A"))
+    c2.metric("Evaluated", len(evaluated))
+    c3.metric("Saved paper buys", len(saved))
+    st.write(result.get("summary", "No autopilot summary available."))
+
+    if saved:
+        st.markdown("**Saved simulated paper buys**")
+        rows = []
+        for item in saved:
+            ticket = item.get("ticket", {})
+            rows.append(
+                {
+                    "symbol": ticket.get("symbol"),
+                    "verdict": ticket.get("final_verdict"),
+                    "lane": ticket.get("lane"),
+                    "score": ticket.get("score"),
+                    "allocation_pct": ticket.get("allocation_pct"),
+                    "quantity": ticket.get("quantity"),
+                    "price": ticket.get("price"),
+                }
+            )
+        st.dataframe(rows, width="stretch")
+    else:
+        st.write("No simulated paper buys were saved.")
+
+    if skipped:
+        st.markdown("**Skipped / blocked candidates**")
+        st.dataframe(
+            [{"symbol": row.get("symbol"), "reason": row.get("reason")} for row in skipped],
+            width="stretch",
+        )
+
+    for item in result.get("checklists", []):
+        st.download_button(
+            f"Download {item.get('symbol', 'ticker')} paper checklist",
+            data=item.get("markdown", ""),
+            file_name=f"{str(item.get('symbol', 'ticker')).upper()}_paper_trade_checklist.md",
+            mime="text/markdown",
+            key=f"download_autopilot_checklist_{item.get('symbol', 'ticker')}",
+        )
+
+    st.caption(result.get("disclaimer", "Simulated paper autopilot only."))
+    return result
 
 
 def render_asset_class_context(symbol, asset_class_context=None):
@@ -1065,6 +1127,7 @@ def render_best_opportunities_workstation(
         market_timing=market_timing or {},
         limit=40,
     )
+    st.session_state.best_opportunities_rows = result.get("ranked", [])
     st.write(result.get("summary", "No best-opportunities summary available."))
 
     lane_tabs = st.tabs(["All", "Long Term", "Short Term", "Futures Proxy", "Needs Data"])
@@ -1077,6 +1140,23 @@ def render_best_opportunities_workstation(
                 st.dataframe(_display_best_opportunity_rows(rows[:20]), width="stretch")
             else:
                 st.write(f"No {lane} rows ranked yet.")
+
+    ranked_rows = result.get("ranked", [])
+    if ranked_rows:
+        pick_options = [
+            f"{row.get('symbol')} | {row.get('best_lane')} | score {row.get('lane_score')}"
+            for row in ranked_rows[:30]
+        ]
+        selected_pick = st.selectbox(
+            "Open an opportunity in every tab",
+            pick_options,
+            key=f"best_opportunity_global_pick_{key_suffix}",
+        )
+        if st.button("Set as Selected Asset", key=f"set_best_opportunity_{key_suffix}"):
+            symbol = selected_pick.split(" | ")[0]
+            promote_symbol_to_selected(symbol)
+            st.success(f"{symbol} is now the global selected asset.")
+            st.rerun()
 
     st.subheader("Any Ticker Research")
     c1, c2 = st.columns([2, 1])
@@ -1120,6 +1200,11 @@ def render_best_opportunities_workstation(
         for item in packet.get("what_would_change_this", [])[:6]:
             st.info(f"- {item}")
         st.write(f"Watchlist view: {packet.get('watchlist_view', 'N/A')}")
+
+        if st.button("Set This Ticker As Selected Asset", key=f"set_any_ticker_{key_suffix}"):
+            promote_symbol_to_selected(packet.get("symbol"))
+            st.success(f"{packet.get('symbol')} is now the global selected asset.")
+            st.rerun()
 
         if st.button("Save Any Ticker Verdict To Learning Log", key=f"save_any_ticker_{key_suffix}"):
             saved = save_recommendation_log(
@@ -1243,6 +1328,22 @@ def render_opportunity_terminal(period, default_rows=None, financial_profile=Non
                 }
             )
         st.dataframe(top_table, width="stretch")
+        pick_options = [
+            f"{row.get('symbol')} | score {row.get('score')} | gate {row.get('recommendation_gate')}"
+            for row in rows[:25]
+            if row.get("symbol")
+        ]
+        if pick_options:
+            selected_pick = st.selectbox(
+                "Open top opportunity in every tab",
+                pick_options,
+                key=f"opportunity_global_pick_{key_suffix}",
+            )
+            if st.button("Set Opportunity As Selected Asset", key=f"set_opportunity_asset_{key_suffix}"):
+                symbol = selected_pick.split(" | ")[0]
+                promote_symbol_to_selected(symbol)
+                st.success(f"{symbol} is now the global selected asset.")
+                st.rerun()
     else:
         st.info("Run the scan to rank the broader opportunity universe.")
 
@@ -2489,6 +2590,38 @@ def render_trade_operations_cockpit(
     st.markdown("**Autopilot safety failed**")
     for item in safety.get("failed", []):
         st.warning(f"- {item}")
+
+    checklist_ticket = {
+        "symbol": symbol,
+        "timestamp": "",
+        "action": order_intent.get("intent_type", "none"),
+        "final_verdict": trade_plan.get("final_verdict", "Watch"),
+        "lane": strategy_type,
+        "score": final_recommendation.get("score", ""),
+        "price": order_intent.get("limit_price", 0.0),
+        "quantity": order_intent.get("quantity", 0.0),
+        "allocation_pct": trade_plan.get("max_position_size", 0.0),
+        "position_value": "",
+        "data_gate": data_quality.get("recommendation_gate", "Warning"),
+        "data_confidence": data_quality.get("data_confidence", "Unknown"),
+        "risk_controls_passed": safety.get("passed", []),
+        "risk_controls_failed": safety.get("failed", []),
+        "benchmark_context": f"Benchmark symbol: {trade_plan.get('benchmark_symbol', 'SPY')}.",
+        "disclaimer": "Simulated paper trade checklist only. No broker APIs, live orders, margin, leverage, or guaranteed profit.",
+    }
+    checklist_agent = {
+        "symbol": symbol,
+        "bull_case": final_recommendation.get("why", []),
+        "bear_case": final_recommendation.get("vetoes", []),
+        "invalidation_triggers": trade_plan.get("invalidation_triggers", []),
+    }
+    st.download_button(
+        "Download Paper Trade Checklist",
+        data=build_paper_trade_checklist_markdown(checklist_ticket, checklist_agent),
+        file_name=f"{symbol}_paper_trade_checklist.md",
+        mime="text/markdown",
+        key=f"download_trade_ops_checklist_{symbol}",
+    )
 
     if st.button("Execute Paper Order Intent", key=f"execute_trade_ops_{symbol}"):
         result = execute_paper_order_intent(order_intent, safety)
@@ -3985,6 +4118,10 @@ def render_agent_research_desk(
         options = [f"{row.get('symbol')} | {row.get('lane')} | score {row.get('score')}" for row in queue_rows]
         selected_queue = st.selectbox("Queue candidate", options, key=f"queue_pick_{key_suffix}")
         selected_symbol = selected_queue.split(" | ")[0]
+        if st.button("Set Queue Candidate As Selected Asset", key=f"set_queue_candidate_{key_suffix}"):
+            promote_symbol_to_selected(selected_symbol)
+            st.success(f"{selected_symbol} is now the global selected asset.")
+            st.rerun()
         if st.button("Run Selected Queue Candidate", key=f"run_queue_candidate_{key_suffix}"):
             st.session_state[f"{key_suffix}_result"] = run_agent_research_desk(
                 selected_symbol,
@@ -4013,6 +4150,10 @@ def render_agent_research_desk(
         c4.metric("Data", result.get("data_quality", {}).get("data_confidence", "Unknown"))
         st.write(result.get("summary", "No agent summary available."))
         st.info(result.get("memory_delta", "No memory comparison available."))
+        if st.button("Set Agent Result As Selected Asset", key=f"set_agent_result_{key_suffix}"):
+            promote_symbol_to_selected(result.get("symbol"))
+            st.success(f"{result.get('symbol')} is now the global selected asset.")
+            st.rerun()
 
         if result.get("lane_scores"):
             st.markdown("**Lane scores**")

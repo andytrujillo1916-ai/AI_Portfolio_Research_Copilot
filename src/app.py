@@ -5,7 +5,7 @@ import streamlit as st
 from backtester import run_simple_backtest, run_strategy_lab
 from market_data import get_market_snapshot, get_price_history, get_watchlist
 from news_engine import generate_news_context
-from paper_trader import calculate_paper_performance, calculate_paper_positions
+from paper_trader import calculate_paper_performance, calculate_paper_positions, load_paper_trades
 from trade_decision_assistant import generate_trade_decision
 from adaptive_learning_engine import calculate_factor_insights
 from prediction_log import evaluate_all_predictions, load_predictions
@@ -51,6 +51,8 @@ from alternative_data_engine import generate_alternative_data_context
 from db_service import load_financial_profile, load_real_holdings
 from growth_discovery_engine import score_growth_discovery
 from market_timing_engine import build_market_timing_context
+from paper_autopilot import run_daily_paper_autopilot
+from research_state import build_research_universe, promote_symbol_to_selected
 from ui_sections import (
     render_asset_comparison,
     render_cross_asset_screener_from_rows,
@@ -129,6 +131,7 @@ from ui_sections import (
     render_learning_engine,
     render_agent_task_runner,
     render_agent_research_desk,
+    render_autopilot_today,
     render_research_journal,
     render_research_notes,
     render_workflow_orchestrator,
@@ -179,14 +182,46 @@ if "last_run_timestamp" not in st.session_state:
     st.session_state.last_run_timestamp = "Never"
 if "run_full_research" not in st.session_state:
     st.session_state.run_full_research = False
+if "custom_research_symbol" not in st.session_state:
+    st.session_state.custom_research_symbol = ""
+if "paper_autopilot_last_run_date" not in st.session_state:
+    st.session_state.paper_autopilot_last_run_date = ""
+if "paper_autopilot_today" not in st.session_state:
+    st.session_state.paper_autopilot_today = None
 
 st.sidebar.header("Research Control Panel")
 
+stored_opportunity_rows = st.session_state.get("opportunity_terminal_rows", [])
+stored_best_opportunity_rows = st.session_state.get("best_opportunities_rows", [])
+research_universe = build_research_universe(
+    watchlist,
+    stored_opportunity_rows + stored_best_opportunity_rows,
+    {},
+    st.session_state.selected_asset,
+)
+if not research_universe:
+    research_universe = ["SPY"]
+st.session_state.research_universe = research_universe
+
+custom_ticker = st.sidebar.text_input(
+    "Research Any US Ticker",
+    value=st.session_state.custom_research_symbol,
+    help="Type a US-listed stock or ETF symbol supported by the market-data source.",
+).upper().strip()
+custom_cols = st.sidebar.columns(2)
+if custom_cols[0].button("Use Ticker"):
+    promoted = promote_symbol_to_selected(custom_ticker)
+    if promoted and promoted not in st.session_state.research_universe:
+        st.session_state.research_universe.append(promoted)
+    st.rerun()
+if custom_ticker and custom_ticker not in watchlist:
+    st.sidebar.caption("Custom ticker is outside the curated watchlist; verify data quality before trusting research output.")
+
 selected_asset = st.sidebar.selectbox(
     "Selected Asset",
-    watchlist,
-    index=watchlist.index(st.session_state.selected_asset)
-    if st.session_state.selected_asset in watchlist
+    st.session_state.research_universe,
+    index=st.session_state.research_universe.index(st.session_state.selected_asset)
+    if st.session_state.selected_asset in st.session_state.research_universe
     else 0,
 )
 period = st.sidebar.selectbox(
@@ -215,6 +250,8 @@ analysis_depth = st.sidebar.selectbox(
 run_full_research_clicked = st.sidebar.button("Run Full Research")
 
 st.session_state.selected_asset = selected_asset
+if selected_asset:
+    st.session_state.custom_research_symbol = selected_asset if selected_asset not in watchlist else st.session_state.custom_research_symbol
 st.session_state.period = period
 st.session_state.shares = shares
 st.session_state.research_mode = research_mode
@@ -256,8 +293,15 @@ try:
 except Exception:
     pass
 
+screen_symbols = build_research_universe(watchlist, [], {}, selected_asset)
 current_prices_by_symbol = {
-    asset: get_market_snapshot(asset).get("price", 0.0) for asset in watchlist
+    asset: get_market_snapshot(asset).get("price", 0.0)
+    for asset in build_research_universe(
+        screen_symbols,
+        stored_opportunity_rows + stored_best_opportunity_rows,
+        {},
+        selected_asset,
+    )
 }
 paper_positions = calculate_paper_positions(current_prices_by_symbol)
 paper_performance = calculate_paper_performance(current_prices_by_symbol)
@@ -268,7 +312,7 @@ strategy_lab_results = run_strategy_lab(price_data)
 regime_data = detect_market_regime(price_data, risk)
 evaluation_summary = evaluate_all_predictions(selected_asset, snapshot.get("price"))
 adaptive_learning = calculate_factor_insights(load_predictions(), load_research_runs())
-screened_assets = run_cross_asset_screen(watchlist, period=period)
+screened_assets = run_cross_asset_screen(screen_symbols, period=period)
 macro_context = generate_macro_context(research_mode=research_mode)
 sector_context = analyze_sector_rotation(period=period, research_mode=research_mode)
 asset_class_context = classify_asset(selected_asset)
@@ -571,7 +615,7 @@ benchmark_truth_exec = compare_to_benchmarks(
     benchmark_comparison_exec,
 )
 walk_forward_validation_exec = run_walk_forward_validation(
-    watchlist,
+    screen_symbols,
     research_mode=research_mode,
     period=period,
 )
@@ -622,7 +666,9 @@ selected_data_quality_exec = {
 }
 stored_financial_profile_exec = load_financial_profile()
 opportunity_terminal_rows_exec = st.session_state.get("opportunity_terminal_rows", [])
+best_opportunity_rows_exec = st.session_state.get("best_opportunities_rows", [])
 opportunity_scan_rows_exec = opportunity_terminal_rows_exec or screened_assets
+autopilot_candidate_rows_exec = best_opportunity_rows_exec or opportunity_scan_rows_exec or decision_ranked_assets
 selected_opportunity_row_exec = next(
     (row for row in opportunity_scan_rows_exec if row.get("symbol") == selected_asset),
     selected_screen_row,
@@ -642,6 +688,28 @@ market_timing_exec = build_market_timing_context(
     macro_context,
     stored_financial_profile_exec,
 )
+st.session_state.research_universe = build_research_universe(
+    watchlist,
+    opportunity_scan_rows_exec + best_opportunity_rows_exec,
+    paper_positions,
+    selected_asset,
+)
+
+today_key = datetime.now().strftime("%Y-%m-%d")
+if st.session_state.paper_autopilot_last_run_date != today_key:
+    st.session_state.paper_autopilot_today = run_daily_paper_autopilot(
+        autopilot_candidate_rows_exec,
+        stored_financial_profile_exec,
+        period,
+        {
+            "portfolio_value": 100000.0,
+            "max_daily_allocation_pct": 10.0,
+            "existing_trades": load_paper_trades(),
+            "today": today_key,
+        },
+        max_trades=3,
+    )
+    st.session_state.paper_autopilot_last_run_date = today_key
 
 (
     tab_buy_finder,
@@ -1000,7 +1068,7 @@ with tab_portfolio:
         research_mode,
     )
 
-    current_allocations = render_portfolio_simulator(watchlist)
+    current_allocations = render_portfolio_simulator(st.session_state.research_universe)
     render_risk_engine(
         selected_asset,
         snapshot,
@@ -1060,7 +1128,7 @@ with tab_portfolio:
         final_recommendation=final_recommendation if "final_recommendation" in locals() else None,
     )
     render_stress_test_engine(paper_positions)
-    render_paper_trading_simulator(watchlist)
+    render_paper_trading_simulator(st.session_state.research_universe)
 
 with tab_etf:
     render_etf_benchmark_dashboard(period, paper_scorecard=paper_scorecard)
@@ -1086,7 +1154,7 @@ with tab_strategy:
     render_strategy_lab(price_data)
     render_walk_forward_section(price_data)
     walk_forward_validation = render_walk_forward_validation(
-        watchlist,
+        st.session_state.research_universe,
         research_mode,
     )
     prediction_eval_summary = evaluate_all_predictions(selected_asset, snapshot.get("price"))
@@ -1125,7 +1193,7 @@ with tab_journal:
         stress_test_results,
         factor_attribution_exec,
     )
-    render_daily_research_report(watchlist, research_mode, period)
+    render_daily_research_report(st.session_state.research_universe, research_mode, period)
     render_prediction_log(selected_asset, snapshot.get("price"))
     render_prediction_evaluation(selected_asset, snapshot.get("price"))
     render_decision_journal(selected_asset, decision, snapshot)
@@ -1143,9 +1211,10 @@ with tab_journal:
     render_research_run_evaluation(selected_asset, snapshot.get("price"))
     render_adaptive_learning()
     render_learning_engine(selected_asset, snapshot.get("price"))
-    render_research_journal(watchlist, selected_asset)
+    render_research_journal(st.session_state.research_universe, selected_asset)
 
 with tab_agents:
+    render_autopilot_today(st.session_state.get("paper_autopilot_today"))
     render_agent_research_desk(
         selected_asset,
         screened_assets,
@@ -1199,11 +1268,11 @@ with tab_health:
     render_alternative_data_context(selected_asset)
     compare_assets = st.multiselect(
         "Compare with assets",
-        [asset for asset in watchlist if asset != selected_asset],
-        default=[asset for asset in watchlist if asset != selected_asset][:2],
+        [asset for asset in st.session_state.research_universe if asset != selected_asset],
+        default=[asset for asset in st.session_state.research_universe if asset != selected_asset][:2],
     )
     normalize = st.checkbox("Normalize performance (start all at 100)", value=True)
-    render_asset_comparison(selected_asset, watchlist, compare_assets, period, normalize)
+    render_asset_comparison(selected_asset, st.session_state.research_universe, compare_assets, period, normalize)
     render_confidence_engine(
         signal_data,
         evaluation_summary,

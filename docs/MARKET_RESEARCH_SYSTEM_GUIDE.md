@@ -106,6 +106,21 @@ Swing trading means holding for days or weeks rather than minutes or years. The 
 
 Futures are different. Futures involve leverage, margin, contract specifications, expiration, and fast losses. This app keeps futures proxy-only. That means it may study broad market proxies, but it does not add futures contracts, margin, leverage, or execution.
 
+### 11. Global Ticker Research
+
+You can type any US-listed stock or ETF ticker into the sidebar. If it is outside the curated watchlist, the app will still research it, but you should pay extra attention to data quality. Opportunity Terminal and Best Opportunities rows can also be promoted into the global selected asset so every tab studies the same ticker.
+
+### 12. Paper Autopilot
+
+The paper autopilot runs agent research on top opportunity candidates and can save simulated paper buys when strict gates pass. It is still only a simulation. It does not route orders, connect to brokers, use margin, trade futures contracts, or guarantee that a setup will work.
+
+The autopilot is meant to create evidence for later review:
+
+- What did the agents think before the move?
+- Which simulated buys worked or failed?
+- Did ETF baselines do better?
+- Did data quality or volatility explain the outcome?
+
 ## Research Workflow Checklist
 
 1. Form a thesis in plain English.
@@ -118,6 +133,8 @@ Futures are different. Futures involve leverage, margin, contract specifications
 8. Save a prediction before the outcome is known.
 9. Review the prediction after the market moves.
 10. Update the thesis only after evidence accumulates.
+11. If paper autopilot saved a trade, download the checklist and review its gates.
+12. Compare the paper trade outcome against the original thesis and ETF baseline.
 
 ## Best-Practice Research Principles
 

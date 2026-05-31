@@ -16,6 +16,8 @@ I built this project to practice full-stack quant research engineering: turning 
 - Position sizing, entry/exit framework, and exposure controls
 - Meta decision layer, sub-agent review board, and executive dashboard
 - Markdown research packet export with fallback/mock data notes
+- Global any-ticker research flow with opportunity-to-tab promotion
+- Daily simulated paper autopilot with downloadable research checklists
 - Research logging, health checks, and workflow orchestration
 
 ## Architecture Overview
@@ -93,6 +95,7 @@ This project is for research and education only.
 
 - No broker API integrations
 - No live trading execution
-- No auto-execution workflows
+- No live auto-execution workflows
+- Simulated paper trades only; no real orders are routed
 - No guaranteed returns or certainty claims
 - Outputs are decision support, not financial advice
